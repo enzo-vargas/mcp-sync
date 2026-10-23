@@ -4,7 +4,7 @@
   "description": "Reconcile MCP servers across opencode, Claude Code and Codex without sharing secrets",
   "type": "module",
   "bin": {
-    "mcp-sync": "src/cli.ts"
+    "mcp-sync": "bin/mcp-sync"
   },
   "scripts": {
     "start": "tsx src/cli.ts",

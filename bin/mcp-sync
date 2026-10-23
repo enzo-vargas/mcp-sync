@@ -1,0 +1,11 @@
+#!/usr/bin/env sh
+SELF="$0"
+while [ -h "$SELF" ]; do
+  TARGET="$(readlink "$SELF")"
+  case "$TARGET" in
+    /*) SELF="$TARGET" ;;
+    *) SELF="$(dirname "$SELF")/$TARGET" ;;
+  esac
+done
+DIR="$(cd "$(dirname "$SELF")/.." && pwd)"
+exec node "$DIR/node_modules/tsx/dist/cli.mjs" "$DIR/src/cli.ts" "$@"
