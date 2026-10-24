@@ -204,6 +204,31 @@ test("private server in a git-tracked file is blocked", async () => {
   }
 });
 
+test("pre-existing high-entropy values do not trip the leak check", async () => {
+  const sb = sandbox();
+  try {
+    sb.write(
+      ".claude.json",
+      JSON.stringify(
+        {
+          userID: "a1b2c3d4e5f60718293a4b5c6d7e8f9012345678abcdef",
+          mcpServers: { "ai-memory": { type: "stdio", command: "ai-memory" } },
+          projects: {},
+        },
+        null,
+        2,
+      ),
+    );
+    sb.write(".config/opencode/opencode.json", emptyOpencode());
+    sb.write(".codex/config.toml", "");
+    const result = await applyAllGlobal();
+    assert.deepEqual(result.leaks, []);
+    assert.match(sb.read(".claude.json"), /a1b2c3d4e5f60718293a4b5c6d7e8f9012345678abcdef/);
+  } finally {
+    sb.cleanup();
+  }
+});
+
 test("rollback restores previous content", async () => {
   const sb = await setup();
   try {

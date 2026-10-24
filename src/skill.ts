@@ -68,6 +68,10 @@ before running any add command. There is no default: the scope is the user's cho
 
 Ask every mcp-sync question as a multiple-choice question with exactly one option marked
 "recommended", so the user can just pick one and press enter instead of typing an answer.
+
+After applying, drive the authentication yourself with \`mcp-sync auth <name>\` instead of
+leaving it as a checklist; only hand off what the CLI cannot do (Claude's \`/mcp\`, exporting
+a secret, a browser login on the user's machine).
 ${BLOCK_END}`;
 
 function resolveTargets(target: string): SkillTargetId[] {

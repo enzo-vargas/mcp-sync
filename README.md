@@ -35,6 +35,7 @@ Isso coloca o comando `mcp-sync` no PATH.
 mcp-sync plan                      # o que mudaria (somente leitura)
 mcp-sync apply --yes               # aplica (faz backup antes)
 mcp-sync status                    # status de auth por agente
+mcp-sync auth <nome>               # conduz a autenticação nativa por agente (e verifica)
 mcp-sync rollback [timestamp]      # restaura o último backup (ou um específico)
 mcp-sync projects add|rm|ls|suggest [path]
 mcp-sync forget <nome>             # limpa o tombstone de um servidor
@@ -179,7 +180,25 @@ Depois de escrever, um scanner procura por `Authorization`/`Bearer`/alta entropi
 
 ## Auth
 
-Não existe "fila de auth": ao fim do `apply` o `mcp-sync` imprime um checklist com o comando oficial de cada agente. `mcp-sync status` consulta o status do opencode e do Codex; o Claude não expõe status de auth por CLI (aparece como desconhecido).
+Credenciais nunca são sincronizadas — cada agente autentica por conta própria. Para
+**conduzir** essa etapa em vez de deixar um checklist pro usuário:
+
+```sh
+mcp-sync auth <nome>              # roda opencode mcp auth + codex mcp login, mostra o passo do Claude, e verifica
+mcp-sync auth <nome> --no-browser # headless: imprime a URL para o usuário concluir
+mcp-sync auth                     # lista os servidores disponíveis
+```
+
+- **opencode / Codex:** `mcp-sync auth` executa `opencode mcp auth <nome>` e
+  `codex mcp login <nome>` para os agentes que têm o servidor.
+- **Claude Code:** não tem auth por CLI — o `auth` imprime o passo (`open /mcp`), que é o
+  único ponto que precisa do usuário.
+- **Servidor com segredo (stdio/header):** o `auth` indica qual variável de ambiente
+  exportar (nunca o valor).
+
+`mcp-sync status` mostra o status por agente (opencode e Codex; Claude aparece como
+desconhecido). A skill instrui o agente a rodar `mcp-sync auth` e conduzir o fluxo até o
+fim, em vez de repassar tarefas.
 
 ## Notificação periódica (opcional)
 

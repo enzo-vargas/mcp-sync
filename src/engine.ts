@@ -106,6 +106,14 @@ function mangle(p: string): string {
   return p.replace(/^\/+/, "").replace(/[^A-Za-z0-9._-]/g, "_");
 }
 
+function addedLines(before: string | null, after: string): string {
+  const prev = new Set((before ?? "").split("\n"));
+  return after
+    .split("\n")
+    .filter((l) => !prev.has(l))
+    .join("\n");
+}
+
 export async function applyPlan(
   plan: Plan,
   opts: ApplyOptions,
@@ -159,7 +167,7 @@ export async function applyPlan(
         result.errors.push(`${rel(ops.target.file)}: ${(e as Error).message}`);
         continue;
       }
-      const leaks = opts.secretLeakCheck === false ? [] : scanForSecrets(next);
+      const leaks = opts.secretLeakCheck === false ? [] : scanForSecrets(addedLines(current, next));
       if (leaks.length) {
         result.leaks.push(
           `${rel(ops.target.file)}:${leaks[0]!.line} (${leaks[0]!.reason})`,

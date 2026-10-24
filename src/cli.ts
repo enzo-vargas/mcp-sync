@@ -8,7 +8,7 @@ import type { KeyAction } from "./merge.js";
 import { planAll, planWith, applyPlan, rollback, collectTargets, moveServer } from "./engine.js";
 import type { Plan } from "./merge.js";
 import { summarize } from "./merge.js";
-import { authChecklist, authStatus } from "./auth.js";
+import { authChecklist, authStatus, authEntries, runAuth } from "./auth.js";
 import { loadProjects, saveProjects, loadState, saveState } from "./state.js";
 import { skillInstall, skillUninstall, skillStatus, repoRoot } from "./skill.js";
 import {
@@ -320,8 +320,9 @@ async function cmdApply(argv: string[]): Promise<void> {
   }
   const steps = authChecklist(plan);
   if (steps.length) {
-    console.log("\nnext: authenticate each server natively");
+    console.log("\nnext: authenticate each server natively — drive it, don't hand it off:");
     for (const s of steps) console.log(`  [${s.agent}] ${s.name}: ${s.command}`);
+    console.log("  or run: mcp-sync auth <name>   (runs the per-agent auth, then verifies)");
   }
 }
 
@@ -329,6 +330,65 @@ async function cmdStatus(): Promise<void> {
   const { statuses, notes } = authStatus();
   for (const s of statuses) console.log(`[${s.agent}] ${s.name}: ${s.status}`);
   for (const n of notes) console.log(`note: ${n}`);
+}
+
+async function cmdAuth(argv: string[]): Promise<void> {
+  const { positional, flags } = parseArgs(argv);
+  const name = positional[0];
+  const noBrowser = Boolean(flags["no-browser"]);
+  const { targets } = await collectTargets();
+
+  if (!name) {
+    const names = new Set<string>();
+    for (const t of targets) {
+      if (!t.available()) continue;
+      const r = t.read();
+      if (r.error) continue;
+      for (const n of r.servers.keys()) names.add(n);
+    }
+    if (names.size === 0) {
+      console.log("no MCP servers found");
+      return;
+    }
+    console.log("usage: mcp-sync auth <name>   — drives native auth per agent");
+    console.log("servers:");
+    for (const n of [...names].sort()) console.log(`  ${n}`);
+    return;
+  }
+
+  const entries = authEntries(targets, name, noBrowser);
+  if (entries.length === 0) {
+    console.log(`"${name}" is not declared in any agent — sync it first (mcp-sync apply --yes)`);
+    return;
+  }
+
+  const pending: typeof entries = [];
+  for (const e of entries) {
+    if (e.kind === "oauth-cli") {
+      console.log(`\n[${e.agent}] ${e.command}`);
+      const status = runAuth(e);
+      if (status !== 0) {
+        console.log(`  (exit ${status}) — finish it manually: ${e.command}`);
+        pending.push(e);
+      }
+    } else if (e.kind === "browser-manual") {
+      console.log(`\n[${e.agent}] ${e.command}`);
+      pending.push(e);
+    } else if (e.kind === "env") {
+      console.log(`\n[${e.agent}] export the credential, then re-run: ${e.command}`);
+      pending.push(e);
+    }
+  }
+
+  console.log("\nverify:");
+  await cmdStatus();
+
+  if (pending.length) {
+    console.log("\nstill to do:");
+    for (const e of pending) console.log(`  [${e.agent}] ${e.command}`);
+  } else {
+    console.log("\nall agents authenticated (where the CLI can do it)");
+  }
 }
 
 async function cmdRollback(argv: string[]): Promise<void> {
@@ -725,6 +785,7 @@ Usage:
   mcp-sync apply [--yes] [--scope global|project[:path]] [--keep-both|--move] [--allow-mass-delete]
   mcp-sync move <name> --to global|project[:path] [--from <scope>]
   mcp-sync status                     auth status per agent
+  mcp-sync auth [<name>] [--no-browser]  drive native authentication per agent
   mcp-sync rollback [timestamp]
   mcp-sync projects add|rm|ls|suggest [path]
   mcp-sync forget <name>
@@ -746,6 +807,9 @@ async function main(): Promise<void> {
       break;
     case "status":
       await cmdStatus();
+      break;
+    case "auth":
+      await cmdAuth(rest);
       break;
     case "rollback":
       await cmdRollback(rest);

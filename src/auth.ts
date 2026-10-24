@@ -1,6 +1,7 @@
-import { execFileSync } from "node:child_process";
+import { execFileSync, spawnSync } from "node:child_process";
 import type { Plan } from "./merge.js";
 import type { AgentId, ServerDef } from "./types.js";
+import type { Target } from "./agents.js";
 import { derivedHeaderEnv } from "./secrets.js";
 
 export interface AuthStep {
@@ -54,6 +55,77 @@ function dedupe(steps: AuthStep[]): AuthStep[] {
     out.push(s);
   }
   return out;
+}
+
+export type AuthKind = "oauth-cli" | "browser-manual" | "env" | "none";
+
+export interface AuthEntry {
+  agent: AgentId;
+  name: string;
+  kind: AuthKind;
+  command: string;
+  run?: { cmd: string; args: string[] };
+}
+
+export function authEntries(targets: Target[], name: string, noBrowser = false): AuthEntry[] {
+  const out: AuthEntry[] = [];
+  const seen = new Set<string>();
+  for (const t of targets) {
+    if (!t.available()) continue;
+    const r = t.read();
+    if (r.error) continue;
+    const def = r.servers.get(name);
+    if (!def) continue;
+    const key = `${t.agent}\u0000${t.scope.kind === "global" ? "global" : "project"}`;
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const env = requiredEnv(def);
+    if (env.length) {
+      out.push({
+        agent: t.agent,
+        name,
+        kind: "env",
+        command: env.map((v) => `export ${v}=...`).join(" && "),
+      });
+      continue;
+    }
+    if (def.transport === "stdio") {
+      out.push({ agent: t.agent, name, kind: "none", command: "(stdio: no auth)" });
+      continue;
+    }
+    if (t.agent === "opencode") {
+      out.push({
+        agent: t.agent,
+        name,
+        kind: "oauth-cli",
+        command: `opencode mcp auth ${name}`,
+        run: { cmd: "opencode", args: ["mcp", "auth", name] },
+      });
+    } else if (t.agent === "codex") {
+      const args = ["mcp", "login", name, ...(noBrowser ? ["--no-browser"] : [])];
+      out.push({
+        agent: t.agent,
+        name,
+        kind: "oauth-cli",
+        command: `codex ${args.join(" ")}`,
+        run: { cmd: "codex", args },
+      });
+    } else {
+      out.push({
+        agent: t.agent,
+        name,
+        kind: "browser-manual",
+        command: `Claude Code: open /mcp and authenticate ${name}`,
+      });
+    }
+  }
+  return out;
+}
+
+export function runAuth(entry: AuthEntry): number {
+  if (!entry.run) return -1;
+  const res = spawnSync(entry.run.cmd, entry.run.args, { stdio: "inherit" });
+  return res.status ?? 1;
 }
 
 export interface AuthStatus {

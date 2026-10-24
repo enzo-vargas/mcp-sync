@@ -20,6 +20,33 @@ This skill does not replace the native `mcp add` commands — the user still int
 server with the agent's own command. mcp-sync then propagates it and keeps the agents
 converged.
 
+## Drive the whole flow (create → sync → authenticate)
+
+Do not stop at handing the user a checklist. When the user asks you to add an MCP, drive
+the whole thing end to end:
+
+1. **Create** it in the scope the user chose (ask first, multiple choice) — with the native
+   `mcp add` for that scope, or by editing the project config file.
+2. **Sync** it: `mcp-sync apply --yes` (with `--scope` if needed).
+3. **Authenticate** it — this is the part that is per-agent and can never be synced, and it
+   is your job to conduct, not to delegate:
+   - Run `mcp-sync auth <name>`. It runs `opencode mcp auth <name>` and
+     `codex mcp login <name>` for the agents that have the server, prints the one Claude
+     step, and then verifies with `mcp-sync status`.
+   - Pass `--no-browser` when the machine is headless; then give the user the printed URL
+     and wait for the callback.
+   - For Claude Code (no CLI auth) tell the user exactly where to click: open the TUI and
+     run `/mcp`, then authenticate that server. If you are Claude Code itself, tell the user
+     to run `/mcp` now.
+   - For a stdio / header server that needs a secret, tell the user precisely which
+     environment variable to export (never the value), wait, then re-run `mcp-sync auth`.
+4. **Verify and repeat** until every agent reports authenticated, then report what is done.
+   If something cannot be completed by CLI, say explicitly what remains and why.
+
+Rule: never end a session with "still to do: run `opencode mcp auth ...`" when you could
+have run it yourself. Only hand off the steps that genuinely require the user (Claude's
+`/mcp`, exporting a secret, a browser login on their machine).
+
 ## How to ask the user (mandatory)
 
 Every question you ask about mcp-sync must be a **multiple-choice question with exactly one
@@ -107,7 +134,7 @@ by plugins, and Hermes.
 | "check the plugin / health / diagnose" | `mcp-sync doctor` |
 | "refresh / reinstall the skill & rules" | `mcp-sync refresh` |
 | "remove MCP X" | remove it in one agent natively, then `mcp-sync plan` + `apply` (it propagates and tombstones) |
-| "authenticate / log into X" | `mcp-sync status`, then the native command it prints (`opencode mcp auth`, `codex mcp login`, Claude `/mcp`) |
+| "authenticate / log into X" | run `mcp-sync auth X` (drives opencode/codex; prints the Claude step), then `mcp-sync status` |
 | "register this project" | `mcp-sync projects add "$(git rev-parse --show-toplevel)"` |
 | "move this MCP to a project / to global" | `mcp-sync move <name> --to global\|project:<path>` |
 | "undo / revert" | `mcp-sync rollback` |
