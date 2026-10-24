@@ -19,6 +19,8 @@ import {
   savePrefsFile,
   setPref,
   prefsPath,
+  addIgnored,
+  removeIgnored,
 } from "./prefs.js";
 import { expandHome, rel, stateDir, configDir } from "./util.js";
 import { readFileSync, readdirSync } from "node:fs";
@@ -812,6 +814,35 @@ async function cmdMove(argv: string[]): Promise<void> {
   if (result.errors.length) for (const e of result.errors) console.log(`  ! ${e}`);
 }
 
+async function cmdIgnore(argv: string[]): Promise<void> {
+  const { positional } = parseArgs(argv);
+  const sub = positional[0];
+  const name = positional[1];
+  if (sub === "add" || (sub && sub !== "rm" && sub !== "ls")) {
+    const target = sub === "add" ? name : sub;
+    if (!target) throw new Error("usage: mcp-sync ignore <name>");
+    const list = await addIgnored(target);
+    console.log(`ignoring "${target}" (mcp-sync will not manage it)`);
+    console.log(`ignored: ${list.join(", ") || "(none)"}`);
+    return;
+  }
+  if (sub === "rm" || sub === "remove") {
+    if (!name) throw new Error("usage: mcp-sync ignore rm <name>");
+    const list = await removeIgnored(name);
+    console.log(`no longer ignoring "${name}"`);
+    console.log(`ignored: ${list.join(", ") || "(none)"}`);
+    return;
+  }
+  const file = await loadPrefsFile();
+  const list = file.prefs.ignoredServers ?? [];
+  if (list.length === 0) {
+    console.log("no ignored servers");
+    return;
+  }
+  console.log("ignored servers (mcp-sync does not manage these):");
+  for (const n of list) console.log(`  ${n}`);
+}
+
 async function cmdCheck(): Promise<void> {
   const plan = await planAll();
   if (hasDrift(plan)) {
@@ -853,6 +884,8 @@ async function cmdDoctor(): Promise<void> {
   }
   ok(`config dir: ${rel(configDir())}`);
   ok(`state dir: ${rel(stateDir())}`);
+  const ignored = prefsFile.prefs.ignoredServers ?? [];
+  ok(`ignored servers: ${ignored.length ? ignored.join(", ") : "(none)"}`);
   try {
     const backups = readdirSync(join(stateDir(), "backups")).length;
     ok(`backups: ${backups}`);
@@ -916,6 +949,17 @@ async function cmdDoctor(): Promise<void> {
     ok(`needs scope: ${a.name} (found in ${scopeId(a.observedScope ?? a.scope)})`);
   }
 
+  const ignoredSet = new Set(ignored);
+  const suggestions = plan.conflicts.filter(
+    (c) => !ignoredSet.has(c.name) && /differently|different definitions/.test(c.reason),
+  );
+  if (suggestions.length) {
+    console.log("\nsuggestions");
+    for (const c of suggestions) {
+      ok(`"${c.name}" differs across agents — if it is per-agent, run: mcp-sync ignore ${c.name}`);
+    }
+  }
+
   const healthy = problems.length === 0;
   console.log(`\n${healthy ? "HEALTH: ok" : `HEALTH: ${[...new Set(problems)].join(", ")}`}`);
   if (!healthy) process.exit(1);
@@ -955,6 +999,7 @@ Usage:
   mcp-sync move <name> --to global|project[:path] [--from <scope>]
   mcp-sync remove <name> [--scope global|project[:path]] [--yes]
   mcp-sync repair [--yes]              resolve duplicate MCPs (interactive)
+  mcp-sync ignore <name>|rm <name>|ls  user-owned MCPs mcp-sync must not manage
   mcp-sync status                     auth status per agent
   mcp-sync auth [<name>] [--no-browser]  drive native authentication per agent
   mcp-sync rollback [timestamp]
@@ -1008,6 +1053,9 @@ async function main(): Promise<void> {
       break;
     case "repair":
       await cmdRepair(rest);
+      break;
+    case "ignore":
+      await cmdIgnore(rest);
       break;
     case "check":
       await cmdCheck();

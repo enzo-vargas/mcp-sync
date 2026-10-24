@@ -76,6 +76,10 @@ a secret, a browser login on the user's machine).
 If \`mcp-sync doctor\` or \`plan\` reports duplicates (same name in multiple scopes, or the
 same server under different names), surface them and resolve with the user via
 \`mcp-sync move\` / \`mcp-sync remove\` / keep both — never ignore them.
+
+Some MCPs are per-agent (the same name must differ per agent, e.g. a session-aware bridge).
+Never sync those: \`mcp-sync ignore <name>\`. \`doctor\` suggests it when a server differs
+across agents.
 ${BLOCK_END}`;
 
 function resolveTargets(target: string): SkillTargetId[] {

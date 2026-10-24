@@ -41,6 +41,7 @@ mcp-sync projects add|rm|ls|suggest [path]
 mcp-sync move <nome> --to global|project[:path]  # reloca um servidor já sincronizado
 mcp-sync remove <nome> [--scope ...]             # remove um servidor (propaga a remoção)
 mcp-sync repair                                  # detecta duplicatas e pergunta como resolver
+mcp-sync ignore <nome>|rm <nome>|ls              # MCPs per-agente (user-owned) que o mcp-sync não gerencia
 mcp-sync forget <nome>             # limpa o tombstone de um servidor
 mcp-sync doctor                    # checkup geral (read-only) do plugin neste repositório
 mcp-sync refresh                   # reinstala skill/regras a partir das preferências + doctor
@@ -162,6 +163,24 @@ não-interativa ele aponta para `mcp-sync repair`. Alternativas manuais:
 `mcp-sync move <nome> --to <escopo>` e `mcp-sync remove <nome> --scope <escopo>`.
 
 O `doctor` conta duplicatas como problema (sai com código ≠ 0) para que apareçam no checkup.
+
+### MCPs per-agente (lista de ignore)
+
+Alguns servidores são **inerentemente por-agente** — o mesmo nome precisa ser declarado
+diferente em cada agente. Ex.: o `ai-memory` — o Claude Code roda o bridge session-aware, o
+opencode precisa de `--no-session-id`, e o Codex recebe por plugin. Um reconcile não
+consegue expressar isso, então esses servidores devem ser **ignorados**:
+
+```sh
+mcp-sync ignore ai-memory      # o mcp-sync não lê, não sincroniza, não remove e não sinaliza
+mcp-sync ignore rm ai-memory
+mcp-sync ignore ls
+```
+
+Nomes ignorados ficam em `~/.config/mcp-sync/config.json` (`ignoredServers`) e saem de todo
+o reconcile (leitura, snapshot, remoções, duplicatas). O `doctor` mostra os ignorados e
+**sugere** `mcp-sync ignore <nome>` quando um servidor difere entre agentes de um jeito que
+parece per-agente.
 
 Ao adicionar nativamente, escolha o escopo correto na hora:
 

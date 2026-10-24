@@ -13,6 +13,7 @@ export interface Prefs {
   massDeleteThreshold: number;
   skillTargets: string[];
   rulesEnabled: boolean;
+  ignoredServers: string[];
 }
 
 export interface PrefsFile {
@@ -30,6 +31,7 @@ export const DEFAULT_PREFS: Prefs = {
   massDeleteThreshold: 5,
   skillTargets: ["agents"],
   rulesEnabled: true,
+  ignoredServers: [],
 };
 
 export const PREF_KEYS: (keyof Prefs)[] = [
@@ -40,6 +42,7 @@ export const PREF_KEYS: (keyof Prefs)[] = [
   "massDeleteThreshold",
   "skillTargets",
   "rulesEnabled",
+  "ignoredServers",
 ];
 
 export function prefsPath(): string {
@@ -108,6 +111,11 @@ export function coercePref(key: string, value: string): Prefs[keyof Prefs] {
         .split(",")
         .map((s) => s.trim())
         .filter(Boolean);
+    case "ignoredServers":
+      return value
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean);
     default:
       throw new Error(`unknown preference "${key}"`);
   }
@@ -122,4 +130,25 @@ export async function setPref(key: string, value: string): Promise<PrefsFile> {
 
 export async function resetPrefsDir(): Promise<void> {
   await fs.rm(configDir(), { recursive: true, force: true });
+}
+
+export async function ignoredServers(): Promise<Set<string>> {
+  const file = await loadPrefsFile();
+  return new Set(file.prefs.ignoredServers ?? []);
+}
+
+export async function addIgnored(name: string): Promise<string[]> {
+  const file = await loadPrefsFile();
+  const list = new Set(file.prefs.ignoredServers ?? []);
+  list.add(name);
+  file.prefs.ignoredServers = [...list];
+  await savePrefsFile(file);
+  return file.prefs.ignoredServers;
+}
+
+export async function removeIgnored(name: string): Promise<string[]> {
+  const file = await loadPrefsFile();
+  file.prefs.ignoredServers = (file.prefs.ignoredServers ?? []).filter((n) => n !== name);
+  await savePrefsFile(file);
+  return file.prefs.ignoredServers;
 }

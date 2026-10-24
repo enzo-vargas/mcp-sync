@@ -9,6 +9,7 @@ import type { ScopeKey } from "./types.js";
 import { scopeId } from "./types.js";
 import type { State } from "./state.js";
 import { loadState, saveState, loadProjects } from "./state.js";
+import { ignoredServers } from "./prefs.js";
 import { scanForSecrets } from "./secrets.js";
 import {
   ensureDir,
@@ -44,7 +45,8 @@ export async function collectTargets(): Promise<{ targets: Target[]; projects: s
 export async function planWith(opts: BuildOptions): Promise<Plan> {
   const { targets } = await collectTargets();
   const state = await loadState();
-  return buildPlan(targets, state, opts);
+  const ignored = opts.ignored ?? (await ignoredServers());
+  return buildPlan(targets, state, { ...opts, ignored });
 }
 
 function candidateKeys(plan: Plan, state: State, name: string): Set<string> {
@@ -64,7 +66,8 @@ export async function removeServer(
 ): Promise<Plan> {
   const { targets } = await collectTargets();
   const state = await loadState();
-  const base = buildPlan(targets, state);
+  const ignored = await ignoredServers();
+  const base = buildPlan(targets, state, { ignored });
   let filtered = [...candidateKeys(base, state, name)];
   if (fromScopeId) filtered = filtered.filter((k) => decodeKey(k).scopeId === fromScopeId);
   if (filtered.length === 0) {
@@ -75,7 +78,7 @@ export async function removeServer(
       `"${name}" exists in multiple scopes: ${filtered.map((k) => decodeKey(k).scopeId).join(", ")}; pass --scope`,
     );
   }
-  return buildPlan(targets, state, { forceRemoveKeys: new Set(filtered) });
+  return buildPlan(targets, state, { forceRemoveKeys: new Set(filtered), ignored });
 }
 
 export async function planAll(
@@ -90,13 +93,14 @@ export async function repairPlan(opts: {
 }): Promise<Plan> {
   const { targets } = await collectTargets();
   const state = await loadState();
-  const base = buildPlan(targets, state, opts);
+  const ignored = await ignoredServers();
+  const base = buildPlan(targets, state, { ...opts, ignored });
   const overrides = new Map<string, ScopeKey>();
   for (const a of base.actions) {
     if (a.needsScope) overrides.set(a.key, a.observedScope ?? a.scope);
   }
   if (overrides.size === 0) return base;
-  return buildPlan(targets, state, { ...opts, scopeOverrides: overrides });
+  return buildPlan(targets, state, { ...opts, ignored, scopeOverrides: overrides });
 }
 
 function decodeKey(key: string): { scopeId: string; name: string } {
@@ -111,7 +115,8 @@ export async function moveServer(
 ): Promise<Plan> {
   const { targets } = await collectTargets();
   const state = await loadState();
-  const base = buildPlan(targets, state);
+  const ignored = await ignoredServers();
+  const base = buildPlan(targets, state, { ignored });
 
   let filtered = [...candidateKeys(base, state, name)];
   if (fromScopeId) filtered = filtered.filter((k) => decodeKey(k).scopeId === fromScopeId);
@@ -131,7 +136,7 @@ export async function moveServer(
 
   const overrides = new Map<string, ScopeKey>();
   for (const k of filtered) overrides.set(k, to);
-  return buildPlan(targets, state, { scopeOverrides: overrides });
+  return buildPlan(targets, state, { scopeOverrides: overrides, ignored });
 }
 
 function backupsRoot(): string {

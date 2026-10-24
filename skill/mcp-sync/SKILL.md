@@ -20,6 +20,24 @@ This skill does not replace the native `mcp add` commands — the user still int
 server with the agent's own command. mcp-sync then propagates it and keeps the agents
 converged.
 
+## Per-agent MCPs (ignore list)
+
+Some servers are inherently per-agent — the same name must be declared differently on each
+agent (e.g. `ai-memory`: Claude Code runs the session-aware bridge, opencode needs
+`--no-session-id`, Codex gets it from a plugin). A reconcile tool cannot express that, so
+those servers must be **ignored**:
+
+```sh
+mcp-sync ignore ai-memory      # mcp-sync will not read, sync, remove or flag it
+mcp-sync ignore rm ai-memory
+mcp-sync ignore ls
+```
+
+Ignored names live in `~/.config/mcp-sync/config.json` (`ignoredServers`) and are excluded
+from the whole reconcile (reads, snapshot, removals, duplicates). `mcp-sync doctor` shows
+them and **suggests** `mcp-sync ignore <name>` when a server differs across agents in a way
+that looks per-agent.
+
 ## Handle duplicates (mandatory)
 
 `mcp-sync doctor` and `mcp-sync plan` flag duplicates:
@@ -167,6 +185,7 @@ agent report the server as failed.
 | "move this MCP to a project / to global" | `mcp-sync move <name> --to global\|project:<path>` |
 | "remove this MCP" | `mcp-sync remove <name> [--scope <scope>]` |
 | "duplicate MCP / it appears twice" | `mcp-sync repair` (asks how to resolve each) |
+| "this MCP is per-agent / don't sync it" | `mcp-sync ignore <name>` |
 | "undo / revert" | `mcp-sync rollback` |
 | "stop re-adding X" | `mcp-sync forget X` |
 

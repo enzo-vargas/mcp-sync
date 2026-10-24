@@ -74,6 +74,7 @@ export interface BuildOptions {
   skipKeys?: Set<string>;
   forceRemoveKeys?: Set<string>;
   dropManaged?: { file: string; name: string }[];
+  ignored?: Set<string>;
 }
 
 export function buildPlan(
@@ -112,6 +113,7 @@ export function buildPlan(
   const keys = new Map<string, { scope: ScopeKey; name: string; occ: Occ[] }>();
   for (const [t, r] of reads) {
     for (const [name, def] of r.servers) {
+      if (opts?.ignored?.has(name)) continue;
       const key = keyId(t.scope, name);
       if (!keys.has(key)) keys.set(key, { scope: t.scope, name, occ: [] });
       keys.get(key)!.occ.push({ agent: t.agent, target: t, def });
@@ -145,6 +147,7 @@ export function buildPlan(
     const b = state.servers[k];
     const sc = e?.scope ?? b!.scope;
     const nm = e?.name ?? b!.name;
+    if (opts?.ignored?.has(nm)) continue;
     const def = e?.occ[0]?.def ?? b?.def;
     nameByKey.set(k, nm);
     scopeByKey.set(k, scopeId(sc));
@@ -164,6 +167,7 @@ export function buildPlan(
     const base = state.servers[key];
     const scope = entry?.scope ?? base!.scope;
     const name = entry?.name ?? base!.name;
+    if (opts?.ignored?.has(name)) continue;
     const scopeTargetsAll = (byScope.get(scopeId(scope)) ?? []).filter(
       (t) => !offline.has(t),
     );
