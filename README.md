@@ -38,6 +38,8 @@ mcp-sync status                    # status de auth por agente
 mcp-sync auth <nome>               # conduz a autenticação nativa por agente (e verifica)
 mcp-sync rollback [timestamp]      # restaura o último backup (ou um específico)
 mcp-sync projects add|rm|ls|suggest [path]
+mcp-sync move <nome> --to global|project[:path]  # reloca um servidor já sincronizado
+mcp-sync remove <nome> [--scope ...]             # remove um servidor (propaga a remoção)
 mcp-sync forget <nome>             # limpa o tombstone de um servidor
 mcp-sync doctor                    # checkup geral (read-only) do plugin neste repositório
 mcp-sync refresh                   # reinstala skill/regras a partir das preferências + doctor
@@ -129,7 +131,26 @@ mexe em servidor já sincronizado):
 
 ```sh
 mcp-sync move <nome> --to "project:/caminho/do/repo" [--from global]
+mcp-sync remove <nome> [--scope global|project:/caminho]
 ```
+
+### Duplicatas
+
+O `plan` e o `doctor` identificam MCPs duplicados:
+
+- **mesmo nome em escopos diferentes** — ex.: `supabase` no global e num projeto (com
+  `project_ref` diferente). É legítimo só se for intencional.
+- **mesmo servidor com nomes diferentes** — a mesma url/comando declarada sob dois nomes.
+
+Resolução:
+
+```sh
+mcp-sync move <nome> --to <escopo>          # consolida num só escopo (remove o outro)
+mcp-sync remove <nome> --scope <escopo>     # remove uma das cópias
+# ou manter os dois, se forem intencionalmente diferentes
+```
+
+O `doctor` conta duplicatas como problema (sai com código ≠ 0) para que apareçam no checkup.
 
 Ao adicionar nativamente, escolha o escopo correto na hora:
 

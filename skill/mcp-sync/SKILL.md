@@ -20,6 +20,21 @@ This skill does not replace the native `mcp add` commands — the user still int
 server with the agent's own command. mcp-sync then propagates it and keeps the agents
 converged.
 
+## Handle duplicates (mandatory)
+
+`mcp-sync doctor` and `mcp-sync plan` flag duplicates:
+
+- **same name, multiple scopes** — e.g. `supabase` in both global and a project (possibly
+  with different `project_ref`). Legit only if intentional.
+- **same server, different names** — the same url/command declared under two names.
+
+When a duplicate appears, surface it and resolve it with the user (multiple choice, one
+recommended) — never ignore it:
+
+- `mcp-sync move <name> --to <scope>` — consolidate to one scope (removes the other copy).
+- `mcp-sync remove <name> --scope <scope>` — drop one copy.
+- keep both — only when the user confirms the two are intentionally different.
+
 ## Drive the whole flow (create → sync → authenticate)
 
 Do not stop at handing the user a checklist. When the user asks you to add an MCP, drive
@@ -137,6 +152,8 @@ by plugins, and Hermes.
 | "authenticate / log into X" | run `mcp-sync auth X` (drives opencode/codex; prints the Claude step), then `mcp-sync status` |
 | "register this project" | `mcp-sync projects add "$(git rev-parse --show-toplevel)"` |
 | "move this MCP to a project / to global" | `mcp-sync move <name> --to global\|project:<path>` |
+| "remove this MCP" | `mcp-sync remove <name> [--scope <scope>]` |
+| "duplicate MCP / it appears twice" | `mcp-sync doctor` to find them, then `move`/`remove`/keep both |
 | "undo / revert" | `mcp-sync rollback` |
 | "stop re-adding X" | `mcp-sync forget X` |
 

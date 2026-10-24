@@ -72,6 +72,10 @@ Ask every mcp-sync question as a multiple-choice question with exactly one optio
 After applying, drive the authentication yourself with \`mcp-sync auth <name>\` instead of
 leaving it as a checklist; only hand off what the CLI cannot do (Claude's \`/mcp\`, exporting
 a secret, a browser login on the user's machine).
+
+If \`mcp-sync doctor\` or \`plan\` reports duplicates (same name in multiple scopes, or the
+same server under different names), surface them and resolve with the user via
+\`mcp-sync move\` / \`mcp-sync remove\` / keep both — never ignore them.
 ${BLOCK_END}`;
 
 function resolveTargets(target: string): SkillTargetId[] {

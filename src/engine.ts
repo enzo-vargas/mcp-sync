@@ -49,6 +49,37 @@ export async function planWith(opts: {
   return buildPlan(targets, state, opts);
 }
 
+function candidateKeys(plan: Plan, state: State, name: string): Set<string> {
+  const candidates = new Set<string>();
+  for (const [k, v] of Object.entries(state.servers)) {
+    if (v.name === name) candidates.add(k);
+  }
+  for (const a of plan.actions) {
+    if (a.name === name) candidates.add(a.key);
+  }
+  return candidates;
+}
+
+export async function removeServer(
+  name: string,
+  fromScopeId?: string,
+): Promise<Plan> {
+  const { targets } = await collectTargets();
+  const state = await loadState();
+  const base = buildPlan(targets, state);
+  let filtered = [...candidateKeys(base, state, name)];
+  if (fromScopeId) filtered = filtered.filter((k) => decodeKey(k).scopeId === fromScopeId);
+  if (filtered.length === 0) {
+    throw new Error(`no server named "${name}" found${fromScopeId ? ` in ${fromScopeId}` : ""}`);
+  }
+  if (filtered.length > 1) {
+    throw new Error(
+      `"${name}" exists in multiple scopes: ${filtered.map((k) => decodeKey(k).scopeId).join(", ")}; pass --scope`,
+    );
+  }
+  return buildPlan(targets, state, { forceRemoveKeys: new Set(filtered) });
+}
+
 export async function planAll(
   scopeOverrides?: Map<string, ScopeKey>,
 ): Promise<Plan> {
@@ -69,15 +100,7 @@ export async function moveServer(
   const state = await loadState();
   const base = buildPlan(targets, state);
 
-  const candidates = new Set<string>();
-  for (const [k, v] of Object.entries(state.servers)) {
-    if (v.name === name) candidates.add(k);
-  }
-  for (const a of base.actions) {
-    if (a.name === name) candidates.add(a.key);
-  }
-
-  let filtered = [...candidates];
+  let filtered = [...candidateKeys(base, state, name)];
   if (fromScopeId) filtered = filtered.filter((k) => decodeKey(k).scopeId === fromScopeId);
   if (filtered.length === 0) {
     throw new Error(`no server named "${name}" found${fromScopeId ? ` in ${fromScopeId}` : ""}`);

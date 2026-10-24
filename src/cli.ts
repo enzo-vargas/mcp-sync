@@ -5,7 +5,7 @@ import { ask, askChoice } from "./prompt.js";
 import type { ServerDef, ScopeKey } from "./types.js";
 import { keyId, scopeFromId, scopeId } from "./types.js";
 import type { KeyAction } from "./merge.js";
-import { planAll, planWith, applyPlan, rollback, collectTargets, moveServer } from "./engine.js";
+import { planAll, planWith, applyPlan, rollback, collectTargets, moveServer, removeServer } from "./engine.js";
 import type { Plan } from "./merge.js";
 import { summarize } from "./merge.js";
 import { authChecklist, authStatus, authEntries, runAuth } from "./auth.js";
@@ -108,6 +108,16 @@ function renderPlan(plan: Plan): void {
     for (const b of plan.blocked) {
       console.log(`  x ${b.name} [${scopeId(b.scope)}] — ${b.reason} (${rel(b.file)})`);
     }
+  }
+
+  if (plan.duplicates.length) {
+    console.log("\nduplicates:");
+    for (const d of plan.duplicates) {
+      const tag = d.kind === "name-cross-scope" ? "same name, multiple scopes" : "same server, different names";
+      console.log(`  ~ ${d.name} — ${tag}`);
+      console.log(`      ${d.detail}`);
+    }
+    console.log("      resolve with: mcp-sync move <name> --to <scope>  |  mcp-sync remove <name> [--scope ...]  |  keep both");
   }
 
   if (plan.notes.length) {
@@ -627,6 +637,39 @@ async function cmdConfig(argv: string[]): Promise<void> {
   }
 }
 
+async function cmdRemove(argv: string[]): Promise<void> {
+  const { positional, flags } = parseArgs(argv);
+  const name = positional[0];
+  if (!name) throw new Error("usage: mcp-sync remove <name> [--scope global|project[:path]] [--yes]");
+  const from =
+    typeof flags.from === "string"
+      ? flags.from
+      : typeof flags.scope === "string"
+        ? scopeId(parseScopeFlag(flags.scope))
+        : undefined;
+
+  const plan = await removeServer(name, from);
+  if (!hasDrift(plan)) {
+    console.log(`"${name}" not found`);
+    return;
+  }
+  renderPlan(plan);
+  const prefs = (await loadPrefsFile()).prefs;
+  if (!flags.yes && prefs.requireApplyConfirmation) {
+    console.log("\n(dry run — re-run with --yes to remove)");
+    return;
+  }
+  const result = await applyPlan(plan, {
+    yes: true,
+    allowMassDelete: Boolean(flags["allow-mass-delete"]),
+    secretLeakCheck: prefs.secretLeakCheck,
+    massDeleteThreshold: prefs.massDeleteThreshold,
+  });
+  console.log(`\nremoved "${name}"`);
+  for (const f of result.written) console.log(`  wrote ${rel(f)}`);
+  if (result.errors.length) for (const e of result.errors) console.log(`  ! ${e}`);
+}
+
 async function cmdMove(argv: string[]): Promise<void> {
   const { positional, flags } = parseArgs(argv);
   const name = positional[0];
@@ -743,6 +786,15 @@ async function cmdDoctor(): Promise<void> {
   ok(`blocked: ${plan.blocked.length}`);
   if (plan.conflicts.length) problems.push("conflicts");
   if (plan.blocked.length) problems.push("blocked");
+  if (plan.duplicates.length) {
+    problems.push("duplicates");
+    console.log("\nduplicates");
+    for (const d of plan.duplicates) {
+      const tag = d.kind === "name-cross-scope" ? "same name, multiple scopes" : "same server, different names";
+      ok(`${d.name} — ${tag} (${d.detail})`);
+    }
+    ok("resolve: mcp-sync move <name> --to <scope> | mcp-sync remove <name> [--scope ...] | keep both");
+  }
   for (const a of plan.actions.filter((a) => a.needsScope)) {
     ok(`needs scope: ${a.name} (found in ${scopeId(a.observedScope ?? a.scope)})`);
   }
@@ -784,6 +836,7 @@ Usage:
   mcp-sync plan                       show the reconcile plan (no writes)
   mcp-sync apply [--yes] [--scope global|project[:path]] [--keep-both|--move] [--allow-mass-delete]
   mcp-sync move <name> --to global|project[:path] [--from <scope>]
+  mcp-sync remove <name> [--scope global|project[:path]] [--yes]
   mcp-sync status                     auth status per agent
   mcp-sync auth [<name>] [--no-browser]  drive native authentication per agent
   mcp-sync rollback [timestamp]
@@ -831,6 +884,9 @@ async function main(): Promise<void> {
       break;
     case "move":
       await cmdMove(rest);
+      break;
+    case "remove":
+      await cmdRemove(rest);
       break;
     case "check":
       await cmdCheck();

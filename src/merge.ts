@@ -21,6 +21,12 @@ export interface Blocked {
   reason: string;
 }
 
+export interface Duplicate {
+  kind: "name-cross-scope" | "same-def-different-name";
+  name: string;
+  detail: string;
+}
+
 export interface KeyAction {
   key: string;
   scope: ScopeKey;
@@ -47,6 +53,7 @@ export interface Plan {
   actions: KeyAction[];
   conflicts: Conflict[];
   blocked: Blocked[];
+  duplicates: Duplicate[];
   notes: string[];
   knownKeys: number;
   newSnapshot: State;
@@ -61,6 +68,7 @@ interface Occ {
 export interface BuildOptions {
   scopeOverrides?: Map<string, ScopeKey>;
   skipKeys?: Set<string>;
+  forceRemoveKeys?: Set<string>;
 }
 
 export function buildPlan(
@@ -105,6 +113,7 @@ export function buildPlan(
     actions: [],
     conflicts: [],
     blocked: [],
+    duplicates: [],
     notes: [],
     knownKeys: 0,
     newSnapshot: { version: 1, servers: {}, tombstones: {} },
@@ -117,15 +126,24 @@ export function buildPlan(
   const allKeys = new Set<string>([...keys.keys(), ...Object.keys(state.servers)]);
   plan.knownKeys = allKeys.size;
 
+  const nameByKey = new Map<string, string>();
+  const scopeByKey = new Map<string, string>();
+  const defByKey = new Map<string, ServerDef>();
   const nameScopes = new Map<string, Set<string>>();
   for (const k of allKeys) {
     const e = keys.get(k);
     const b = state.servers[k];
     const sc = e?.scope ?? b!.scope;
     const nm = e?.name ?? b!.name;
+    const def = e?.occ[0]?.def ?? b?.def;
+    nameByKey.set(k, nm);
+    scopeByKey.set(k, scopeId(sc));
+    if (def) defByKey.set(k, def);
     if (!nameScopes.has(nm)) nameScopes.set(nm, new Set());
     nameScopes.get(nm)!.add(scopeId(sc));
   }
+
+  plan.duplicates = findDuplicates(allKeys, nameByKey, scopeByKey, defByKey, nameScopes);
 
   for (const key of allKeys) {
     if (opts?.skipKeys?.has(key)) continue;
@@ -139,6 +157,11 @@ export function buildPlan(
     const activeAgents = new Set(scopeTargets.map((t) => t.agent));
     const occ = entry?.occ ?? [];
     const isPrivate = occ.length > 0 && occ.every((o) => o.target.private);
+
+    if (opts?.forceRemoveKeys?.has(key)) {
+      emitRemove(plan, key, scope, name, scopeTargets, base?.private ?? false, isPrivate);
+      continue;
+    }
 
     const defsByHash = new Map<string, ServerDef>();
     for (const o of occ) defsByHash.set(defHash(o.def), o.def);
@@ -254,6 +277,52 @@ export function buildPlan(
   }
 
   return plan;
+}
+
+function findDuplicates(
+  allKeys: Set<string>,
+  nameByKey: Map<string, string>,
+  scopeByKey: Map<string, string>,
+  defByKey: Map<string, ServerDef>,
+  nameScopes: Map<string, Set<string>>,
+): Duplicate[] {
+  const out: Duplicate[] = [];
+
+  for (const [nm, scopes] of nameScopes) {
+    if (scopes.size > 1) {
+      out.push({
+        kind: "name-cross-scope",
+        name: nm,
+        detail: `declared in ${[...scopes].join(" and ")}`,
+      });
+    }
+  }
+
+  const byScopeDef = new Map<string, Map<string, Set<string>>>();
+  for (const k of allKeys) {
+    const def = defByKey.get(k);
+    if (!def) continue;
+    const sid = scopeByKey.get(k)!;
+    const nm = nameByKey.get(k)!;
+    if (!byScopeDef.has(sid)) byScopeDef.set(sid, new Map());
+    const m = byScopeDef.get(sid)!;
+    const h = defHash(def);
+    if (!m.has(h)) m.set(h, new Set());
+    m.get(h)!.add(nm);
+  }
+  for (const [sid, m] of byScopeDef) {
+    for (const names of m.values()) {
+      if (names.size > 1) {
+        out.push({
+          kind: "same-def-different-name",
+          name: [...names].sort().join(", "),
+          detail: `same definition in ${sid}: ${[...names].sort().join(", ")}`,
+        });
+      }
+    }
+  }
+
+  return out;
 }
 
 function destTarget(
