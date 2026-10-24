@@ -7,6 +7,7 @@ import type { Plan } from "./merge.js";
 import { summarize } from "./merge.js";
 import { authChecklist, authStatus } from "./auth.js";
 import { loadProjects, saveProjects, loadState, saveState } from "./state.js";
+import { skillInstall, skillUninstall, skillStatus } from "./skill.js";
 import { expandHome, rel } from "./util.js";
 import { readFileSync } from "node:fs";
 import { existsSync } from "node:fs";
@@ -220,6 +221,48 @@ async function cmdForget(argv: string[]): Promise<void> {
   console.log(`cleared ${removed} tombstone(s) for "${name}"`);
 }
 
+async function cmdSkill(argv: string[]): Promise<void> {
+  const { positional, flags } = parseArgs(argv);
+  const sub = positional[0];
+  const target = typeof flags.target === "string" ? flags.target : "agents";
+  const withRules = flags["no-rules"] ? false : true;
+  const force = Boolean(flags.force);
+
+  if (sub === "install") {
+    const res = await skillInstall({
+      target,
+      copy: Boolean(flags.copy),
+      withRules,
+      force,
+    });
+    for (const p of res.installed) console.log(`installed skill: ${rel(p)}`);
+    for (const p of res.rules) console.log(`installed rule block: ${rel(p)}`);
+    for (const s of res.skipped) console.log(`skipped: ${rel(s)}`);
+    if (!res.installed.length) console.log("nothing installed");
+    return;
+  }
+  if (sub === "uninstall") {
+    const res = await skillUninstall({ target, withRules, force });
+    for (const p of res.removed) console.log(`removed skill: ${rel(p)}`);
+    for (const p of res.rules) console.log(`removed rule block: ${rel(p)}`);
+    for (const s of res.skipped) console.log(`skipped: ${rel(s)}`);
+    if (!res.removed.length && !res.rules.length) console.log("nothing removed");
+    return;
+  }
+  if (sub === "status" || sub === undefined) {
+    const st = skillStatus();
+    console.log("skill targets:");
+    for (const t of st.targets) console.log(`  [${t.id}] ${t.mode}  ${rel(t.path)}`);
+    console.log("rule blocks:");
+    for (const r of st.rules) {
+      const state = r.present ? "present" : r.enabled ? "absent" : "n/a (agent absent)";
+      console.log(`  [${r.agent}] ${state}  ${rel(r.file)}`);
+    }
+    return;
+  }
+  throw new Error("usage: mcp-sync skill install|uninstall|status [--target agents|claude|opencode|all] [--copy] [--no-rules] [--force]");
+}
+
 async function cmdCheck(): Promise<void> {
   const plan = await planAll();
   if (hasDrift(plan)) {
@@ -240,6 +283,7 @@ Usage:
   mcp-sync rollback [timestamp]
   mcp-sync projects add|rm|ls|suggest [path]
   mcp-sync forget <name>
+  mcp-sync skill install|uninstall|status [--target agents|claude|opencode|all] [--copy] [--no-rules]
   mcp-sync check                      exit 1 if drift (for periodic notification)
 `);
 }
@@ -264,6 +308,9 @@ async function main(): Promise<void> {
       break;
     case "forget":
       await cmdForget(rest);
+      break;
+    case "skill":
+      await cmdSkill(rest);
       break;
     case "check":
       await cmdCheck();

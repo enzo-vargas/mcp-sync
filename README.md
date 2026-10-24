@@ -104,6 +104,32 @@ Não existe "fila de auth": ao fim do `apply` o `mcp-sync` imprime um checklist 
 mcp-sync check || echo "mcp-sync: drift detectado"
 ```
 
+## Agent Skill (opcional)
+
+O repositório inclui uma Agent Skill (`skill/mcp-sync/`) que ensina o agente a usar o
+`mcp-sync` por **intenção semântica** ("sincroniza meus MCPs", "remove o MCP X", "meus MCPs
+estão em sync?") e a rodar um **checkup de setup/saúde** no início da sessão.
+
+Instale no seu escopo global:
+
+```sh
+mcp-sync skill install          # ~/.agents/skills/mcp-sync (symlink) + snippet de regra
+mcp-sync skill status           # onde está instalado
+mcp-sync skill uninstall        # remove (só o que é gerenciado pelo mcp-sync)
+```
+
+- `--target agents|claude|opencode|all` escolhe o root global (default `agents`).
+- `--copy` copia em vez de symlinkar.
+- `--no-rules` não escreve o snippet em `~/.config/opencode/AGENTS.md` / `~/.claude/CLAUDE.md`.
+- `--force` sobrescreve/remove itens não gerenciados.
+
+O snippet de regra só manda **carregar a skill e rodar o checkup** (read-only); ele nunca
+aplica mudanças sozinho. O checkup também pode ser rodado direto:
+
+```sh
+bash skill/mcp-sync/scripts/checkup.sh
+```
+
 ## Desenvolvimento
 
 ```sh
