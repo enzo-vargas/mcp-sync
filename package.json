@@ -11,12 +11,42 @@
     "test": "tsx --test test/*.test.ts",
     "typecheck": "tsc --noEmit"
   },
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "opencode",
+    "claude-code",
+    "codex",
+    "cli",
+    "sync",
+    "reconcile"
+  ],
+  "license": "MIT",
+  "author": "Enzo Vargas",
+  "homepage": "https://github.com/enzo-vargas/mcp-sync",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/enzo-vargas/mcp-sync.git"
+  },
+  "bugs": {
+    "url": "https://github.com/enzo-vargas/mcp-sync/issues"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "files": [
+    "bin/",
+    "src/",
+    "skill/",
+    "README.md",
+    "LICENSE"
+  ],
+  "dependencies": {
+    "smol-toml": "^1.9.1",
+    "tsx": "^4.19.2"
+  },
   "devDependencies": {
     "@types/node": "^22.10.2",
-    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
-  },
-  "dependencies": {
-    "smol-toml": "^1.9.1"
   }
 }

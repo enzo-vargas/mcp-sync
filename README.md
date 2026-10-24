@@ -1,5 +1,8 @@
 # mcp-sync
 
+[![CI](https://github.com/enzo-vargas/mcp-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/enzo-vargas/mcp-sync/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
+
 Sincroniza a **declaração** dos servidores MCP entre **opencode**, **Claude Code** e **Codex** — em qualquer direção. Adicionar, alterar ou remover um MCP em um agente se reflete nos outros.
 
 O `mcp-sync` **nunca copia credenciais**. Ele propaga só a definição (nome, transporte, url, comando, nomes de variáveis de ambiente) e deixa cada agente autenticar por conta própria.
@@ -316,3 +319,13 @@ npm run typecheck # tsc --noEmit
 - O Codex não tem escopo de projeto por CLI; `<p>/.codex/config.toml` só é usado se já existir.
 - Conflitos são apenas reportados (não há resolução automática de "quem vence"); use `mcp-sync move` para relocar.
 - Formatos dos CLIs mudam entre versões; os leitores/escritores refletem opencode 1.19.3, Claude Code 2.1.63 e Codex 0.163.0.
+
+## Contribuindo
+
+Veja [CONTRIBUTING.md](./CONTRIBUTING.md). Segurança: [SECURITY.md](./SECURITY.md) — o
+`mcp-sync` nunca sincroniza credenciais; reporte qualquer forma de vazamento de segredo de
+forma privada.
+
+## Licença
+
+[MIT](./LICENSE) © Enzo Vargas
