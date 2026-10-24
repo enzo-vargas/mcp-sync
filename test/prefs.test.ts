@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
-import { join } from "node:path";
+import { dirname } from "node:path";
 import { sandbox } from "./helpers.js";
 import {
   loadPrefsFile,
@@ -43,7 +43,7 @@ test("save + load roundtrip sets setupComplete", async () => {
 test("unknown keys are preserved across saves", async () => {
   const sb = sandbox();
   try {
-    mkdirSync(join(sb.dir, ".config/mcp-sync"), { recursive: true });
+    mkdirSync(dirname(prefsPath()), { recursive: true });
     writeFileSync(
       prefsPath(),
       JSON.stringify({

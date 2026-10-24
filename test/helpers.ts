@@ -15,6 +15,7 @@ export function sandbox(): Sandbox {
   const dir = mkdtempSync(join(tmpdir(), "mcp-sync-test-"));
   process.env.MCP_SYNC_HOME = dir;
   process.env.MCP_SYNC_STATE_DIR = join(dir, "state");
+  process.env.MCP_SYNC_CONFIG_DIR = join(dir, "config");
   mkdirSync(join(dir, ".config", "opencode"), { recursive: true });
   mkdirSync(join(dir, ".codex"), { recursive: true });
   return {
