@@ -31,6 +31,8 @@ export interface KeyAction {
   to?: ServerDef;
   agents: AgentId[];
   files: string[];
+  needsScope?: boolean;
+  observedScope?: ScopeKey;
 }
 
 export interface TargetOps {
@@ -55,9 +57,14 @@ interface Occ {
   def: ServerDef;
 }
 
+export interface BuildOptions {
+  scopeOverrides?: Map<string, ScopeKey>;
+}
+
 export function buildPlan(
   targets: Target[],
   state: State,
+  opts?: BuildOptions,
 ): Plan {
   const reads = new Map<Target, ReadResult>();
   const offline = new Set<Target>();
@@ -183,7 +190,22 @@ export function buildPlan(
       continue;
     }
     const desired = defs[0]!;
+    const override = opts?.scopeOverrides?.get(key);
+    if (override && scopeId(override) !== scopeId(scope)) {
+      const destTargets = (byScope.get(scopeId(override)) ?? []).filter(
+        (t) => !offline.has(t),
+      );
+      const destAgents = new Set(destTargets.map((t) => t.agent));
+      emitRemove(plan, key, scope, name, scopeTargets, false, isPrivate);
+      emitWrite(plan, keyId(override, name), override, name, desired, undefined, false, destTargets, destAgents);
+      continue;
+    }
     emitWrite(plan, key, scope, name, desired, undefined, isPrivate, scopeTargets, activeAgents);
+    if (!override) {
+      const action = plan.actions[plan.actions.length - 1]!;
+      action.needsScope = true;
+      action.observedScope = scope;
+    }
   }
 
   return plan;

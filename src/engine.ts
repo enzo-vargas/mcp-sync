@@ -4,6 +4,7 @@ import type { Target } from "./agents.js";
 import { agentTargets } from "./agents.js";
 import type { Plan } from "./merge.js";
 import { buildPlan } from "./merge.js";
+import type { ScopeKey } from "./types.js";
 import type { State } from "./state.js";
 import { loadState, saveState, loadProjects } from "./state.js";
 import { scanForSecrets } from "./secrets.js";
@@ -36,10 +37,12 @@ export async function collectTargets(): Promise<{ targets: Target[]; projects: s
   return { targets: agentTargets(projects), projects };
 }
 
-export async function planAll(): Promise<Plan> {
+export async function planAll(
+  scopeOverrides?: Map<string, ScopeKey>,
+): Promise<Plan> {
   const { targets } = await collectTargets();
   const state = await loadState();
-  return buildPlan(targets, state);
+  return buildPlan(targets, state, { scopeOverrides });
 }
 
 function backupsRoot(): string {
@@ -61,6 +64,14 @@ export async function applyPlan(
     errors: [],
     backupTs: null,
   };
+
+  const pendingScope = plan.actions.filter((a) => a.needsScope);
+  if (pendingScope.length > 0) {
+    throw new Error(
+      `new server(s) need an explicit scope: ${pendingScope.map((a) => a.name).join(", ")}. ` +
+        `Pass --scope global|project[:path] (there is no default).`,
+    );
+  }
 
   const distinctRemoves = plan.actions.filter((a) => a.action === "remove").length;
   if (

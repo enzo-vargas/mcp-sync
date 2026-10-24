@@ -4,7 +4,23 @@ import { sandbox, claudeGlobal, emptyOpencode, gitInit } from "./helpers.js";
 import { planAll, applyPlan } from "../src/engine.js";
 import { saveProjects, loadState } from "../src/state.js";
 import { scanForSecrets } from "../src/secrets.js";
+import type { Plan } from "../src/merge.js";
+import type { ScopeKey } from "../src/types.js";
 import { join } from "node:path";
+
+async function resolveGlobal(plan: Plan): Promise<Plan> {
+  const overrides = new Map<string, ScopeKey>();
+  for (const a of plan.actions) if (a.needsScope) overrides.set(a.key, { kind: "global" });
+  return overrides.size ? await planAll(overrides) : plan;
+}
+
+async function applyResolved(plan: Plan) {
+  return applyPlan(await resolveGlobal(plan), { yes: true, allowMassDelete: false });
+}
+
+async function applyAllGlobal() {
+  return applyResolved(await planAll());
+}
 
 function codexConfig(url: string): string {
   return `[mcp_servers.supabase]\nurl = "${url}"\n`;
@@ -29,7 +45,7 @@ test("first run unions servers into all agents", async () => {
   const sb = await setup();
   try {
     const plan = await planAll();
-    const result = await applyPlan(plan, { yes: true, allowMassDelete: false });
+    const result = await applyResolved(plan);
     assert.equal(result.errors.length, 0);
     assert.equal(result.leaks.length, 0);
 
@@ -51,7 +67,7 @@ test("first run unions servers into all agents", async () => {
 test("second run is a no-op (idempotent)", async () => {
   const sb = await setup();
   try {
-    await applyPlan(await planAll(), { yes: true, allowMassDelete: false });
+    await applyAllGlobal();
     const plan = await planAll();
     assert.equal(plan.actions.length, 0);
     assert.equal(plan.conflicts.length, 0);
@@ -63,12 +79,12 @@ test("second run is a no-op (idempotent)", async () => {
 test("update in one agent propagates", async () => {
   const sb = await setup();
   try {
-    await applyPlan(await planAll(), { yes: true, allowMassDelete: false });
+    await applyAllGlobal();
     sb.write(".codex/config.toml", codexConfig("https://mcp.supabase.com/mcp?new=1"));
     const plan = await planAll();
     const update = plan.actions.find((a) => a.name === "supabase");
     assert.equal(update?.action, "update");
-    await applyPlan(plan, { yes: true, allowMassDelete: false });
+    await applyResolved(plan);
     const opencode = JSON.parse(sb.read(".config/opencode/opencode.json"));
     assert.match(opencode.mcp.supabase.url, /new=1/);
   } finally {
@@ -79,7 +95,7 @@ test("update in one agent propagates", async () => {
 test("removal propagates to all and is tombstoned", async () => {
   const sb = await setup();
   try {
-    await applyPlan(await planAll(), { yes: true, allowMassDelete: false });
+    await applyAllGlobal();
     const claude = JSON.parse(sb.read(".claude.json"));
     delete claude.mcpServers["ai-memory"];
     sb.write(".claude.json", JSON.stringify(claude, null, 2));
@@ -87,7 +103,7 @@ test("removal propagates to all and is tombstoned", async () => {
     const plan = await planAll();
     const remove = plan.actions.find((a) => a.name === "ai-memory");
     assert.equal(remove?.action, "remove");
-    await applyPlan(plan, { yes: true, allowMassDelete: false });
+    await applyResolved(plan);
 
     const opencode = JSON.parse(sb.read(".config/opencode/opencode.json"));
     assert.equal(opencode.mcp["ai-memory"], undefined);
@@ -109,7 +125,7 @@ test("removal propagates to all and is tombstoned", async () => {
 test("conflict: changed in one, removed in another -> no action", async () => {
   const sb = await setup();
   try {
-    await applyPlan(await planAll(), { yes: true, allowMassDelete: false });
+    await applyAllGlobal();
     sb.write(".codex/config.toml", codexConfig("https://changed.example/mcp"));
     const claude = JSON.parse(sb.read(".claude.json"));
     delete claude.mcpServers["supabase"];
@@ -126,7 +142,7 @@ test("conflict: changed in one, removed in another -> no action", async () => {
 test("malformed config excludes the agent and does not remove", async () => {
   const sb = await setup();
   try {
-    await applyPlan(await planAll(), { yes: true, allowMassDelete: false });
+    await applyAllGlobal();
     sb.write(".codex/config.toml", "this is = = not valid toml [[[");
     const plan = await planAll();
     assert.equal(plan.actions.filter((a) => a.action === "remove").length, 0);
@@ -148,7 +164,7 @@ test("no secret is written to any target", async () => {
   });
   try {
     const plan = await planAll();
-    await applyPlan(plan, { yes: true, allowMassDelete: false });
+    await applyResolved(plan);
     for (const f of [
       ".config/opencode/opencode.json",
       ".claude.json",
@@ -193,7 +209,7 @@ test("rollback restores previous content", async () => {
   try {
     const before = sb.read(".claude.json");
     const plan = await planAll();
-    const result = await applyPlan(plan, { yes: true, allowMassDelete: false });
+    const result = await applyResolved(plan);
     assert.notEqual(sb.read(".claude.json"), before);
     const { rollback } = await import("../src/engine.js");
     await rollback(result.backupTs ?? undefined);

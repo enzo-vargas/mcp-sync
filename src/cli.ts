@@ -1,7 +1,10 @@
 #!/usr/bin/env node
 import process from "node:process";
+import { execFileSync } from "node:child_process";
+import * as readline from "node:readline/promises";
 import type { ServerDef, ScopeKey } from "./types.js";
 import { scopeId } from "./types.js";
+import type { KeyAction } from "./merge.js";
 import { planAll, applyPlan, rollback, collectTargets } from "./engine.js";
 import type { Plan } from "./merge.js";
 import { summarize } from "./merge.js";
@@ -72,11 +75,14 @@ function renderPlan(plan: Plan): void {
       const mark =
         a.action === "add" ? "+" : a.action === "update" ? "~" : a.action === "remove" ? "-" : " ";
       const priv = a.private ? " (private)" : "";
-      console.log(`  ${mark} ${a.name}${priv}`);
+      const q = a.needsScope ? " ?" : "";
+      console.log(`  ${mark} ${a.name}${priv}${q}`);
       if (a.to) console.log(`      ${describeDef(a.to)}`);
       if (a.action === "update" && a.from)
         console.log(`      was: ${describeDef(a.from)}`);
       console.log(`      agents: ${a.agents.join(", ") || "(blocked)"}`);
+      if (a.needsScope)
+        console.log(`      scope: not chosen yet (found in ${scopeId(a.observedScope ?? a.scope)})`);
     }
   }
 
@@ -107,6 +113,75 @@ function hasDrift(plan: Plan): boolean {
   return plan.actions.length > 0 || plan.conflicts.length > 0 || plan.blocked.length > 0;
 }
 
+function currentProjectRoot(): string {
+  try {
+    return execFileSync("git", ["rev-parse", "--show-toplevel"], {
+      encoding: "utf8",
+      stdio: ["ignore", "pipe", "ignore"],
+    }).trim();
+  } catch {
+    return process.cwd();
+  }
+}
+
+function parseScopeFlag(value: string): ScopeKey {
+  if (value === "global") return { kind: "global" };
+  if (value === "project") return { kind: "project", path: currentProjectRoot() };
+  if (value.startsWith("project:")) {
+    const p = value.slice("project:".length);
+    return { kind: "project", path: expandHome(p || currentProjectRoot()) };
+  }
+  throw new Error(`invalid --scope "${value}" (use global | project | project:<path>)`);
+}
+
+async function resolveScopes(
+  pending: KeyAction[],
+  flags: Record<string, string | boolean>,
+): Promise<Map<string, ScopeKey>> {
+  const overrides = new Map<string, ScopeKey>();
+  if (typeof flags.scope === "string") {
+    const scope = parseScopeFlag(flags.scope);
+    for (const a of pending) overrides.set(a.key, scope);
+    return overrides;
+  }
+  if (!process.stdin.isTTY) {
+    throw new Error(
+      `new server(s) need an explicit scope: ${pending.map((a) => a.name).join(", ")}. ` +
+        `Pass --scope global|project[:path] (there is no default).`,
+    );
+  }
+  const projects = await loadProjects();
+  const root = currentProjectRoot();
+  const choices: { label: string; scope: ScopeKey }[] = [
+    { label: "global (every project)", scope: { kind: "global" } },
+  ];
+  for (const p of [...new Set([root, ...projects])]) {
+    choices.push({ label: `project ${p}`, scope: { kind: "project", path: p } });
+  }
+
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    for (const a of pending) {
+      console.log(`\nNew MCP "${a.name}" (found in ${scopeId(a.observedScope ?? a.scope)}).`);
+      console.log("Where should it live? There is no default — choose:");
+      choices.forEach((c, i) => console.log(`  [${i + 1}] ${c.label}`));
+      console.log(`  [s] skip`);
+      const answer = (await rl.question("> ")).trim().toLowerCase();
+      if (answer === "s" || answer === "") continue;
+      const idx = Number.parseInt(answer, 10) - 1;
+      const chosen = choices[idx];
+      if (!chosen) {
+        console.log("  invalid choice, skipping");
+        continue;
+      }
+      overrides.set(a.key, chosen.scope);
+    }
+  } finally {
+    rl.close();
+  }
+  return overrides;
+}
+
 async function cmdPlan(): Promise<void> {
   const plan = await planAll();
   renderPlan(plan);
@@ -114,7 +189,21 @@ async function cmdPlan(): Promise<void> {
 
 async function cmdApply(argv: string[]): Promise<void> {
   const { flags } = parseArgs(argv);
-  const plan = await planAll();
+  let plan = await planAll();
+
+  const pending = plan.actions.filter((a) => a.needsScope);
+  if (flags.yes && pending.length > 0) {
+    const overrides = await resolveScopes(pending, flags);
+    if (overrides.size > 0) plan = await planAll(overrides);
+    const still = plan.actions.filter((a) => a.needsScope);
+    if (still.length > 0) {
+      throw new Error(
+        `new server(s) still need a scope: ${still.map((a) => a.name).join(", ")}. ` +
+          `Pass --scope global|project[:path] (there is no default).`,
+      );
+    }
+  }
+
   const { adds, updates, removes } = summarize(plan);
   if (!hasDrift(plan)) {
     console.log("in sync — nothing to do");
@@ -278,7 +367,7 @@ function usage(): void {
 
 Usage:
   mcp-sync plan                       show the reconcile plan (no writes)
-  mcp-sync apply [--yes] [--allow-mass-delete]
+  mcp-sync apply [--yes] [--scope global|project[:path]] [--allow-mass-delete]
   mcp-sync status                     auth status per agent
   mcp-sync rollback [timestamp]
   mcp-sync projects add|rm|ls|suggest [path]

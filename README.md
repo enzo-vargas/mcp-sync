@@ -54,6 +54,33 @@ codex mcp login <nome>
 mcp-sync status
 ```
 
+## Escopo: não existe default
+
+Ao adicionar um MCP novo, **não há escopo padrão** — é escolha do usuário (global ou
+projeto). O `mcp-sync` nunca decide sozinho: um servidor novo aparece no `plan` com `?`
+(escopo ainda não escolhido) e o `apply` **recusa** colocá-lo sem uma escolha explícita.
+
+Resolva de uma das formas:
+
+```sh
+mcp-sync apply --yes                 # pergunta interativamente (TTY)
+mcp-sync apply --yes --scope global  # global em todos os projetos
+mcp-sync apply --yes --scope project # projeto atual
+mcp-sync apply --yes --scope "project:/caminho/do/repo"
+```
+
+Se o servidor foi declarado no escopo errado (ex.: o default `local` do `claude mcp add`),
+escolher outro escopo o **reloca**: remove do escopo antigo e adiciona no escolhido.
+
+Ao adicionar nativamente, escolha o escopo correto na hora:
+
+| Escopo | Claude Code | opencode | Codex |
+|---|---|---|---|
+| global | `claude mcp add -s user ...` | `opencode mcp add ...` | `codex mcp add ...` |
+| projeto | `claude mcp add -s project ...` | editar `<repo>/opencode.json` | `<repo>/.codex/config.toml` (se existir) |
+
+A skill reforça isso: o agente sempre pergunta o escopo antes de adicionar.
+
 ## O que sincroniza
 
 | | Claude Code | opencode | Codex |

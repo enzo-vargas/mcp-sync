@@ -66,13 +66,37 @@ by plugins, and Hermes.
 
 | The user says | Do this |
 |---|---|
-| "sync my MCPs", "add/update this MCP everywhere" | `mcp-sync plan`, show it, then `mcp-sync apply --yes` after confirmation |
+| "sync my MCPs", "add/update this MCP everywhere" | if it is a new MCP, ask global vs project first; then `mcp-sync plan`, show it, and `mcp-sync apply --yes` (with `--scope` if needed) after confirmation |
 | "are my MCPs in sync?" | `mcp-sync plan` (or `mcp-sync check`) |
 | "remove MCP X" | remove it in one agent natively, then `mcp-sync plan` + `apply` (it propagates and tombstones) |
 | "authenticate / log into X" | `mcp-sync status`, then the native command it prints (`opencode mcp auth`, `codex mcp login`, Claude `/mcp`) |
 | "register this project" | `mcp-sync projects add "$(git rev-parse --show-toplevel)"` |
 | "undo / revert" | `mcp-sync rollback` |
 | "stop re-adding X" | `mcp-sync forget X` |
+
+## Adding a new MCP — always ask the scope (no default)
+
+When the user wants to add a new MCP, **always ask whether it should be global or
+project-scoped before running any add command**. There is no default; the scope is the
+user's choice. Do not infer it from the agent's native default.
+
+Map the answer to the native command:
+
+- **Global** (every project):
+  - Claude Code: `claude mcp add -s user <name> ...` (never rely on the `local` default)
+  - opencode: `opencode mcp add <name> ...` (writes the global config)
+  - Codex: `codex mcp add <name> ...` (writes `~/.codex/config.toml`)
+- **Project** (one repository):
+  - Claude Code: `claude mcp add -s project <name> ...` (writes `<repo>/.mcp.json`)
+  - opencode: edit `<repo>/opencode.json` (`mcp.<name>`) — `opencode mcp add` cannot target a project
+  - Codex: `<repo>/.codex/config.toml` (`[mcp_servers.<name>]`), only if that file already exists
+  - Ensure the project is registered: `mcp-sync projects add <repo>`
+
+If the server was already declared in the wrong scope (e.g. Claude's `local` default),
+`mcp-sync` will flag it as `?` (scope not chosen). Resolve it explicitly — either run
+`mcp-sync apply --yes` and answer the interactive prompt, or pass
+`mcp-sync apply --yes --scope global` / `--scope project:<path>`. `apply` refuses to place a
+new server without an explicit scope.
 
 ## Safety rules (mandatory)
 
@@ -88,6 +112,8 @@ by plugins, and Hermes.
    `--allow-mass-delete`; only pass it when the user clearly wants it.
 6. **This is not an input layer.** Do not invent servers; a server must exist in at least
    one agent first.
+7. **Always ask the scope for a new MCP.** Global or project — no default. Never let a
+   native default (e.g. Claude's `local`) decide silently.
 
 ## Troubleshooting
 
