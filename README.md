@@ -38,6 +38,8 @@ mcp-sync status                    # status de auth por agente
 mcp-sync rollback [timestamp]      # restaura o último backup (ou um específico)
 mcp-sync projects add|rm|ls|suggest [path]
 mcp-sync forget <nome>             # limpa o tombstone de um servidor
+mcp-sync doctor                    # checkup geral (read-only) do plugin neste repositório
+mcp-sync refresh                   # reinstala skill/regras a partir das preferências + doctor
 mcp-sync check                     # sai != 0 se há drift (para notificação periódica)
 mcp-sync targets                   # quais arquivos são lidos/escritos
 ```
@@ -194,8 +196,24 @@ O snippet de regra só manda **carregar a skill e rodar o checkup** (read-only);
 aplica mudanças sozinho. O checkup também pode ser rodado direto:
 
 ```sh
+mcp-sync doctor                  # relatório completo (read-only)
 bash skill/mcp-sync/scripts/checkup.sh
 ```
+
+## Checkup geral (`doctor`)
+
+`mcp-sync doctor` é um relatório **read-only** do plugin dentro do repositório atual:
+binário/versão, preferências, diretórios (XDG), agentes detectados, projetos registrados,
+estado da skill/regras, drift, conflitos e bloqueados. Termina numa linha `HEALTH:` e sai
+com código `!= 0` quando há problema (ex.: `needs-setup`, `conflicts`, `blocked`,
+`skill-missing`) — útil para CI ou para a skill no início da sessão.
+
+```sh
+mcp-sync doctor || echo "mcp-sync: precisa de atenção"
+```
+
+`mcp-sync refresh` reinstala a skill e os snippets de regra a partir das preferências
+(`skillTargets`, `rulesEnabled`) e roda o `doctor` em seguida — o "consertar e verificar".
 
 ## Desenvolvimento
 
@@ -207,5 +225,5 @@ npm run typecheck # tsc --noEmit
 ## Limitações
 
 - O Codex não tem escopo de projeto por CLI; `<p>/.codex/config.toml` só é usado se já existir.
-- Resolução automática de conflito (`--prefer <agente>`) ainda não implementada — conflitos são apenas reportados.
+- Conflitos são apenas reportados (não há resolução automática de "quem vence"); use `mcp-sync move` para relocar.
 - Formatos dos CLIs mudam entre versões; os leitores/escritores refletem opencode 1.19.3, Claude Code 2.1.63 e Codex 0.163.0.

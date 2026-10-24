@@ -10,7 +10,7 @@ import type { Plan } from "./merge.js";
 import { summarize } from "./merge.js";
 import { authChecklist, authStatus } from "./auth.js";
 import { loadProjects, saveProjects, loadState, saveState } from "./state.js";
-import { skillInstall, skillUninstall, skillStatus } from "./skill.js";
+import { skillInstall, skillUninstall, skillStatus, repoRoot } from "./skill.js";
 import {
   DEFAULT_PREFS,
   PREF_KEYS,
@@ -19,9 +19,10 @@ import {
   setPref,
   prefsPath,
 } from "./prefs.js";
-import { expandHome, rel } from "./util.js";
-import { readFileSync } from "node:fs";
+import { expandHome, rel, stateDir, configDir } from "./util.js";
+import { readFileSync, readdirSync } from "node:fs";
 import { existsSync } from "node:fs";
+import { join } from "node:path";
 
 function parseArgs(argv: string[]) {
   const positional: string[] = [];
@@ -577,6 +578,119 @@ async function cmdCheck(): Promise<void> {
   console.log("in sync");
 }
 
+function mcpSyncVersion(): string {
+  try {
+    const pkg = JSON.parse(readFileSync(join(repoRoot(), "package.json"), "utf8"));
+    return String(pkg.version ?? "unknown");
+  } catch {
+    return "unknown";
+  }
+}
+
+async function cmdDoctor(): Promise<void> {
+  const problems: string[] = [];
+  const ok = (s: string) => console.log(`  ${s}`);
+
+  console.log(`mcp-sync doctor  (v${mcpSyncVersion()})`);
+
+  console.log("\nbinary");
+  ok(`path: ${process.argv[1] ?? "mcp-sync"}`);
+  ok(`version: ${mcpSyncVersion()}`);
+
+  console.log("\nconfig");
+  const prefsFile = await loadPrefsFile();
+  ok(`file: ${rel(prefsPath())}`);
+  if (prefsFile.setupComplete) {
+    ok(`setup: complete`);
+    ok(`newServerScope=${prefsFile.prefs.newServerScope} onScopeConflict=${prefsFile.prefs.onScopeConflict}`);
+  } else {
+    ok(`setup: NOT configured — run 'mcp-sync setup'`);
+    problems.push("needs-setup");
+  }
+  ok(`config dir: ${rel(configDir())}`);
+  ok(`state dir: ${rel(stateDir())}`);
+  try {
+    const backups = readdirSync(join(stateDir(), "backups")).length;
+    ok(`backups: ${backups}`);
+  } catch {
+    ok(`backups: 0`);
+  }
+
+  console.log("\nagents");
+  const { targets } = await collectTargets();
+  const agentStates = new Map<string, boolean>();
+  for (const t of targets) {
+    if (t.scope.kind === "global") agentStates.set(t.agent, t.available());
+  }
+  for (const [agent, on] of agentStates) ok(`${agent}: ${on ? "installed" : "not detected"}`);
+
+  console.log("\nprojects");
+  const projects = await loadProjects();
+  const root = currentProjectRoot();
+  ok(`registered: ${projects.length}`);
+  ok(`current root: ${root}`);
+  ok(`current root registered: ${projects.includes(root) ? "yes" : "no"}`);
+
+  console.log("\nskill");
+  const st = skillStatus();
+  const wanted = prefsFile.prefs.skillTargets ?? ["agents"];
+  let anySkill = false;
+  for (const t of st.targets) {
+    const label = wanted.includes(t.id) ? "" : " (not configured target)";
+    ok(`[${t.id}] ${t.mode}${label}  ${rel(t.path)}`);
+    if (wanted.includes(t.id) && t.mode !== "absent") anySkill = true;
+  }
+  if (prefsFile.setupComplete && prefsFile.prefs.rulesEnabled && !anySkill) {
+    problems.push("skill-missing");
+  }
+  for (const r of st.rules) {
+    const state = r.present ? "present" : r.enabled ? "absent" : "n/a";
+    ok(`rule [${r.agent}] ${state}  ${rel(r.file)}`);
+    if (prefsFile.setupComplete && prefsFile.prefs.rulesEnabled && r.enabled && !r.present) {
+      problems.push(`rule-missing:${r.agent}`);
+    }
+  }
+
+  console.log("\nreconcile");
+  const plan = await planAll();
+  const { adds, updates, removes } = summarize(plan);
+  ok(`drift: +${adds} ~${updates} -${removes}`);
+  ok(`conflicts: ${plan.conflicts.length}`);
+  ok(`blocked: ${plan.blocked.length}`);
+  if (plan.conflicts.length) problems.push("conflicts");
+  if (plan.blocked.length) problems.push("blocked");
+  for (const a of plan.actions.filter((a) => a.needsScope)) {
+    ok(`needs scope: ${a.name} (found in ${scopeId(a.observedScope ?? a.scope)})`);
+  }
+
+  const healthy = problems.length === 0;
+  console.log(`\n${healthy ? "HEALTH: ok" : `HEALTH: ${[...new Set(problems)].join(", ")}`}`);
+  if (!healthy) process.exit(1);
+}
+
+async function cmdRefresh(): Promise<void> {
+  const prefsFile = await loadPrefsFile();
+  if (!prefsFile.setupComplete) {
+    throw new Error("not set up yet — run 'mcp-sync setup' first");
+  }
+  const prefs = prefsFile.prefs;
+  if (prefs.rulesEnabled) {
+    const res = await skillInstall({
+      target: prefs.skillTargets.join(",") || "agents",
+      copy: false,
+      withRules: true,
+      force: false,
+    });
+    for (const p of res.installed) console.log(`skill: ${rel(p)}`);
+    for (const p of res.rules) console.log(`rule: ${rel(p)}`);
+    for (const s of res.skipped) console.log(`skipped: ${rel(s)}`);
+  } else {
+    console.log("rulesEnabled=false — skipping skill/rule refresh");
+  }
+  console.log("");
+  await cmdDoctor();
+}
+
 function usage(): void {
   console.log(`mcp-sync — reconcile MCP servers across opencode, Claude Code and Codex
 
@@ -591,6 +705,8 @@ Usage:
   mcp-sync projects add|rm|ls|suggest [path]
   mcp-sync forget <name>
   mcp-sync skill install|uninstall|status [--target agents|claude|opencode|all] [--copy] [--no-rules]
+  mcp-sync doctor                     full read-only health report (this repo + plugin)
+  mcp-sync refresh                    re-install skill/rules from prefs, then doctor
   mcp-sync check                      exit 1 if drift (for periodic notification)
 `);
 }
@@ -630,6 +746,12 @@ async function main(): Promise<void> {
       break;
     case "check":
       await cmdCheck();
+      break;
+    case "doctor":
+      await cmdDoctor();
+      break;
+    case "refresh":
+      await cmdRefresh();
       break;
     case "targets": {
       const { targets } = await collectTargets();

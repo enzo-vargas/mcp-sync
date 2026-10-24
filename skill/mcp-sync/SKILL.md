@@ -25,20 +25,20 @@ converged.
 When this skill loads, run the read-only checkup and report a short summary:
 
 ```sh
-bash "$(dirname "<this skill's SKILL.md>")/scripts/checkup.sh"
+mcp-sync doctor
 ```
 
-If the path is unknown, the script also ships in the repo at `skill/mcp-sync/scripts/checkup.sh`.
-It prints a `HEALTH:` verdict line:
+(or `bash "<this skill's SKILL.md dir>/scripts/checkup.sh"`, which delegates to `doctor`).
+It prints a `HEALTH:` verdict line and exits non-zero on problems:
 
 - `not-installed` — the `mcp-sync` binary is not on PATH. Show the install steps below; do
   not try to sync.
-- `not-registered` — the current project is not registered, so only global-scope MCPs sync.
-  Mention `mcp-sync projects add <path>` if the user wants project scope.
+- `needs-setup` — preferences are not configured. Run the onboarding below first.
 - `drift` — there is a difference between agents. Run `mcp-sync plan` and offer to apply.
-- `ok` — in sync.
+- `ok` — healthy.
 
-The checkup never writes. Never run `apply` as part of the checkup.
+`doctor` is read-only (it also reports config, agents, projects, skill/rule install state,
+and reconcile drift). Never run `apply` as part of the checkup.
 
 ## First run: onboarding
 
@@ -91,6 +91,8 @@ by plugins, and Hermes.
 |---|---|
 | "sync my MCPs", "add/update this MCP everywhere" | if it is a new MCP, ask global vs project first; then `mcp-sync plan`, show it, and `mcp-sync apply --yes` (with `--scope` if needed) after confirmation |
 | "are my MCPs in sync?" | `mcp-sync plan` (or `mcp-sync check`) |
+| "check the plugin / health / diagnose" | `mcp-sync doctor` |
+| "refresh / reinstall the skill & rules" | `mcp-sync refresh` |
 | "remove MCP X" | remove it in one agent natively, then `mcp-sync plan` + `apply` (it propagates and tombstones) |
 | "authenticate / log into X" | `mcp-sync status`, then the native command it prints (`opencode mcp auth`, `codex mcp login`, Claude `/mcp`) |
 | "register this project" | `mcp-sync projects add "$(git rev-parse --show-toplevel)"` |
