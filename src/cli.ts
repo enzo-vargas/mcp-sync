@@ -73,8 +73,14 @@ function renderPlan(plan: Plan): void {
     byScope.get(id)!.push(a);
   }
 
-  if (plan.actions.length === 0 && !plan.conflicts.length && !plan.blocked.length) {
+  if (
+    plan.actions.length === 0 &&
+    !plan.conflicts.length &&
+    !plan.blocked.length &&
+    !plan.duplicates.length
+  ) {
     console.log("in sync — nothing to do");
+    for (const n of plan.notes) console.log(`  note: ${n}`);
     return;
   }
 

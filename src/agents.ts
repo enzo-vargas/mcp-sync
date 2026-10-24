@@ -27,6 +27,7 @@ export interface Target {
 
 export interface ReadResult {
   servers: Map<string, ServerDef>;
+  provided?: Set<string>;
   error?: string;
 }
 
@@ -253,7 +254,7 @@ function codexTarget(
         const def = codexToDef(raw);
         if (def) servers.set(name, def);
       }
-      return { servers };
+      return { servers, provided: codexProvidedNames(doc) };
     },
     render(current, ops) {
       let text = current ?? "";
@@ -301,3 +302,20 @@ function codexToDef(raw: any): ServerDef | null {
     headerKeys: [],
   };
 }
+
+// MCP names Codex already provides through plugins (e.g.
+// [plugins."ai-memory@ai-memory".mcp_servers.ai-memory]). These must never be
+// written into [mcp_servers] — that creates a duplicate that Codex reports as failed.
+function codexProvidedNames(doc: any): Set<string> {
+  const names = new Set<string>();
+  const plugins = doc?.plugins;
+  if (!plugins || typeof plugins !== "object") return names;
+  for (const plugin of Object.values(plugins as Record<string, any>)) {
+    const provided = plugin?.mcp_servers;
+    if (provided && typeof provided === "object") {
+      for (const name of Object.keys(provided)) names.add(name);
+    }
+  }
+  return names;
+}
+

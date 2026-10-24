@@ -138,7 +138,10 @@ npm install && npm link          # or: ln -s "$PWD/bin/mcp-sync" ~/.local/bin/mc
 - `plan` is read-only; `apply` writes with a backup.
 
 What is **not** synced: secret values, `approval_mode`/per-tool permissions, MCPs provided
-by plugins, and Hermes.
+by plugins, and Hermes. In particular, if an agent already provides a server through a
+plugin (e.g. Codex's `[plugins."…".mcp_servers.<name>]`), mcp-sync **skips that agent** for
+that server instead of writing a duplicate into `[mcp_servers]` — writing it would make the
+agent report the server as failed.
 
 ## Intent → action
 
@@ -212,4 +215,7 @@ that are already synced.
 - **`~/.claude.json` changes seem to be reverted** → Claude Code is running and rewrites
   that file; close it, then re-run `apply`.
 - **Config malformed** → that agent is dropped from the run; fix the JSON/TOML and re-run.
+- **An MCP shows as "failed" in an agent** → likely a duplicate: the server is provided by a
+  plugin and also present in the managed config. mcp-sync no longer creates that duplicate;
+  if one already exists, remove the stale `[mcp_servers.<name>]` entry and re-run.
 - **Want a project-scoped MCP ignored** → do not register that project.

@@ -92,6 +92,11 @@ export function buildPlan(
     reads.set(t, r);
   }
 
+  const providedByTarget = new Map<Target, Set<string>>();
+  for (const [t, r] of reads) {
+    if (r.provided && r.provided.size) providedByTarget.set(t, r.provided);
+  }
+
   const byScope = new Map<string, Target[]>();
   for (const t of targets) {
     const id = scopeId(t.scope);
@@ -151,8 +156,21 @@ export function buildPlan(
     const base = state.servers[key];
     const scope = entry?.scope ?? base!.scope;
     const name = entry?.name ?? base!.name;
-    const scopeTargets = (byScope.get(scopeId(scope)) ?? []).filter(
+    const scopeTargetsAll = (byScope.get(scopeId(scope)) ?? []).filter(
       (t) => !offline.has(t),
+    );
+    const providedTargets = scopeTargetsAll.filter((t) => providedByTarget.get(t)?.has(name));
+    const providedAgents = [...new Set(providedTargets.map((t) => t.agent))];
+    if (
+      providedAgents.length &&
+      (!base || base.agents.some((a) => providedAgents.includes(a)))
+    ) {
+      plan.notes.push(
+        `"${name}" is provided by a plugin in ${providedAgents.join(", ")} — not synced there`,
+      );
+    }
+    const scopeTargets = scopeTargetsAll.filter(
+      (t) => !providedByTarget.get(t)?.has(name),
     );
     const activeAgents = new Set(scopeTargets.map((t) => t.agent));
     const occ = entry?.occ ?? [];

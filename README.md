@@ -175,7 +175,10 @@ Só projetos **registrados** (`mcp-sync projects add <path>`) são sincronizados
 
 - Valores de segredo (token, header `Authorization`, env sensível).
 - `approval_mode` / permissões por ferramenta.
-- MCPs fornecidos por plugin (ex.: o ai-memory como plugin do Codex).
+- MCPs fornecidos por plugin — e o mcp-sync **pula aquele agente** para esse servidor em vez
+  de escrever uma duplicata. Ex.: se o Codex já provê `ai-memory` via
+  `[plugins."ai-memory@ai-memory".mcp_servers.ai-memory]`, ele **não** grava
+  `[mcp_servers.ai-memory]` (isso faria o Codex marcar o servidor como `failed`).
 - Hermes.
 
 ## Segredos
