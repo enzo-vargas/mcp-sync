@@ -40,6 +40,7 @@ mcp-sync rollback [timestamp]      # restaura o último backup (ou um específic
 mcp-sync projects add|rm|ls|suggest [path]
 mcp-sync move <nome> --to global|project[:path]  # reloca um servidor já sincronizado
 mcp-sync remove <nome> [--scope ...]             # remove um servidor (propaga a remoção)
+mcp-sync repair                                  # detecta duplicatas e pergunta como resolver
 mcp-sync forget <nome>             # limpa o tombstone de um servidor
 mcp-sync doctor                    # checkup geral (read-only) do plugin neste repositório
 mcp-sync refresh                   # reinstala skill/regras a partir das preferências + doctor
@@ -138,17 +139,27 @@ mcp-sync remove <nome> [--scope global|project:/caminho]
 
 O `plan` e o `doctor` identificam MCPs duplicados:
 
+- **plugin-managed** — um agente provê o servidor por **plugin** e **também** tem uma entrada
+  gerenciada `[mcp_servers.<nome>]` (foi o que fez o Codex marcar o `ai-memory` como failed).
 - **mesmo nome em escopos diferentes** — ex.: `supabase` no global e num projeto (com
   `project_ref` diferente). É legítimo só se for intencional.
 - **mesmo servidor com nomes diferentes** — a mesma url/comando declarada sob dois nomes.
 
-Resolução:
+Para resolver, use o comando de reparo — ele **pergunta (múltipla escolha, com recomendação)
+como resolver cada duplicata** e aplica:
 
 ```sh
-mcp-sync move <nome> --to <escopo>          # consolida num só escopo (remove o outro)
-mcp-sync remove <nome> --scope <escopo>     # remove uma das cópias
-# ou manter os dois, se forem intencionalmente diferentes
+mcp-sync repair          # detecta, pergunta, e repara
+mcp-sync repair --yes    # aplica sem o dry-run
 ```
+
+- plugin-managed → remove a entrada gerenciada (mantém a do plugin) **[recomendado]**.
+- mesmo nome em escopos → manter os dois **[recomendado]**, ou remover a cópia de um escopo.
+- mesmo servidor com nomes → remover um dos nomes.
+
+`mcp-sync apply --yes` também pergunta quando há duplicata (interativo); em execução
+não-interativa ele aponta para `mcp-sync repair`. Alternativas manuais:
+`mcp-sync move <nome> --to <escopo>` e `mcp-sync remove <nome> --scope <escopo>`.
 
 O `doctor` conta duplicatas como problema (sai com código ≠ 0) para que apareçam no checkup.
 

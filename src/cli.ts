@@ -2,11 +2,12 @@
 import process from "node:process";
 import { execFileSync } from "node:child_process";
 import { ask, askChoice } from "./prompt.js";
+import type { Choice } from "./prompt.js";
 import type { ServerDef, ScopeKey } from "./types.js";
 import { keyId, scopeFromId, scopeId } from "./types.js";
 import type { KeyAction } from "./merge.js";
-import { planAll, planWith, applyPlan, rollback, collectTargets, moveServer, removeServer } from "./engine.js";
-import type { Plan } from "./merge.js";
+import { planAll, planWith, applyPlan, rollback, collectTargets, moveServer, removeServer, repairPlan } from "./engine.js";
+import type { Plan, Duplicate } from "./merge.js";
 import { summarize } from "./merge.js";
 import { authChecklist, authStatus, authEntries, runAuth } from "./auth.js";
 import { loadProjects, saveProjects, loadState, saveState } from "./state.js";
@@ -161,6 +162,94 @@ function parseScopeFlag(value: string): ScopeKey {
 
 type ConflictStrategy = "keep-both" | "move" | "cancel";
 
+async function resolveDuplicates(
+  dups: Duplicate[],
+): Promise<{ forceRemoveKeys: Set<string>; dropManaged: { file: string; name: string }[] }> {
+  const forceRemoveKeys = new Set<string>();
+  const dropManaged: { file: string; name: string }[] = [];
+  for (const d of dups) {
+    if (d.kind === "plugin-managed") {
+      const choice = await askChoice<"remove" | "keep">(
+        `\nDuplicate: ${d.detail}.`,
+        [
+          {
+            label: `remove the managed [mcp_servers.${d.name}] entry (keep the plugin-provided one)`,
+            value: "remove",
+            recommended: true,
+          },
+          { label: "keep both", value: "keep" },
+        ],
+      );
+      if (choice === "remove") for (const f of d.files ?? []) dropManaged.push({ file: f, name: d.name });
+      continue;
+    }
+    if (d.kind === "name-cross-scope") {
+      const options: Choice<string>[] = [{ label: "keep both (they are intentional)", value: "keep", recommended: true }];
+      for (const s of d.scopes ?? []) options.push({ label: `remove the copy in ${s}`, value: `remove:${s}` });
+      options.push({ label: "cancel", value: "cancel" });
+      const choice = await askChoice<string>(`\nDuplicate: "${d.name}" — ${d.detail}. How to resolve?`, options);
+      if (choice.startsWith("remove:")) {
+        forceRemoveKeys.add(keyId(scopeFromId(choice.slice("remove:".length)), d.name));
+      }
+      continue;
+    }
+    const names = d.names ?? [];
+    const scope = (d.scopes ?? ["global"])[0]!;
+    const options: Choice<string>[] = names.map((n, i) => ({
+      label: `remove "${n}"`,
+      value: `remove:${n}`,
+      recommended: i === names.length - 1,
+    }));
+    options.push({ label: "keep both", value: "keep" });
+    options.push({ label: "cancel", value: "cancel" });
+    const choice = await askChoice<string>(
+      `\nDuplicate: same server under ${names.join(" and ")} (${scope}). How to resolve?`,
+      options,
+    );
+    if (choice.startsWith("remove:")) {
+      forceRemoveKeys.add(keyId(scopeFromId(scope), choice.slice("remove:".length)));
+    }
+  }
+  return { forceRemoveKeys, dropManaged };
+}
+
+async function cmdRepair(argv: string[]): Promise<void> {
+  const { flags } = parseArgs(argv);
+  const base = await planAll();
+  if (base.duplicates.length === 0) {
+    console.log("no duplicates");
+    return;
+  }
+  console.log("duplicates found:");
+  for (const d of base.duplicates) console.log(`  ~ ${d.name} — ${d.detail}`);
+
+  if (!process.stdin.isTTY) {
+    throw new Error("repair needs an interactive terminal to ask how to resolve each duplicate");
+  }
+  const { forceRemoveKeys, dropManaged } = await resolveDuplicates(base.duplicates);
+  if (forceRemoveKeys.size === 0 && dropManaged.length === 0) {
+    console.log("\nkept as is — nothing to repair");
+    return;
+  }
+
+  const plan = await repairPlan({ forceRemoveKeys, dropManaged });
+  renderPlan(plan);
+  const prefs = (await loadPrefsFile()).prefs;
+  if (!flags.yes && prefs.requireApplyConfirmation) {
+    console.log("\n(dry run — re-run with --yes to apply)");
+    return;
+  }
+  const result = await applyPlan(plan, {
+    yes: true,
+    allowMassDelete: Boolean(flags["allow-mass-delete"]),
+    secretLeakCheck: prefs.secretLeakCheck,
+    massDeleteThreshold: prefs.massDeleteThreshold,
+  });
+  console.log("\nrepaired");
+  for (const f of result.written) console.log(`  wrote ${rel(f)}`);
+  if (result.errors.length) for (const e of result.errors) console.log(`  ! ${e}`);
+}
+
 async function resolveScopes(
   pending: KeyAction[],
   flags: Record<string, string | boolean>,
@@ -290,18 +379,40 @@ async function cmdPlan(): Promise<void> {
 
 async function cmdApply(argv: string[]): Promise<void> {
   const { flags } = parseArgs(argv);
+  const opts: {
+    scopeOverrides?: Map<string, ScopeKey>;
+    skipKeys?: Set<string>;
+    forceRemoveKeys?: Set<string>;
+    dropManaged?: { file: string; name: string }[];
+  } = {};
+
   let plan = await planAll();
 
   const pending = plan.actions.filter((a) => a.needsScope);
   if (flags.yes && pending.length > 0) {
     const { overrides, skip } = await resolveScopes(pending, flags);
-    plan = await planWith({ scopeOverrides: overrides, skipKeys: skip });
+    opts.scopeOverrides = overrides;
+    opts.skipKeys = skip;
+    plan = await planWith(opts);
     const still = plan.actions.filter((a) => a.needsScope);
     if (still.length > 0) {
       throw new Error(
         `new server(s) still need a scope: ${still.map((a) => a.name).join(", ")}. ` +
           `Pass --scope global|project[:path] (there is no default).`,
       );
+    }
+  }
+
+  if (plan.duplicates.length > 0) {
+    if (flags.yes && process.stdin.isTTY) {
+      console.log("duplicates found:");
+      for (const d of plan.duplicates) console.log(`  ~ ${d.name} — ${d.detail}`);
+      const { forceRemoveKeys, dropManaged } = await resolveDuplicates(plan.duplicates);
+      opts.forceRemoveKeys = forceRemoveKeys;
+      opts.dropManaged = dropManaged;
+      plan = await planWith(opts);
+    } else {
+      console.log("duplicates present — run `mcp-sync repair` to resolve them");
     }
   }
 
@@ -799,7 +910,7 @@ async function cmdDoctor(): Promise<void> {
       const tag = d.kind === "name-cross-scope" ? "same name, multiple scopes" : "same server, different names";
       ok(`${d.name} — ${tag} (${d.detail})`);
     }
-    ok("resolve: mcp-sync move <name> --to <scope> | mcp-sync remove <name> [--scope ...] | keep both");
+    ok("resolve: mcp-sync repair  (asks how to resolve each)  |  move / remove / keep both");
   }
   for (const a of plan.actions.filter((a) => a.needsScope)) {
     ok(`needs scope: ${a.name} (found in ${scopeId(a.observedScope ?? a.scope)})`);
@@ -843,6 +954,7 @@ Usage:
   mcp-sync apply [--yes] [--scope global|project[:path]] [--keep-both|--move] [--allow-mass-delete]
   mcp-sync move <name> --to global|project[:path] [--from <scope>]
   mcp-sync remove <name> [--scope global|project[:path]] [--yes]
+  mcp-sync repair [--yes]              resolve duplicate MCPs (interactive)
   mcp-sync status                     auth status per agent
   mcp-sync auth [<name>] [--no-browser]  drive native authentication per agent
   mcp-sync rollback [timestamp]
@@ -893,6 +1005,9 @@ async function main(): Promise<void> {
       break;
     case "remove":
       await cmdRemove(rest);
+      break;
+    case "repair":
+      await cmdRepair(rest);
       break;
     case "check":
       await cmdCheck();

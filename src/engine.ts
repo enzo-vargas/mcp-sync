@@ -4,6 +4,7 @@ import type { Target } from "./agents.js";
 import { agentTargets } from "./agents.js";
 import type { Plan } from "./merge.js";
 import { buildPlan } from "./merge.js";
+import type { BuildOptions } from "./merge.js";
 import type { ScopeKey } from "./types.js";
 import { scopeId } from "./types.js";
 import type { State } from "./state.js";
@@ -40,10 +41,7 @@ export async function collectTargets(): Promise<{ targets: Target[]; projects: s
   return { targets: agentTargets(projects), projects };
 }
 
-export async function planWith(opts: {
-  scopeOverrides?: Map<string, ScopeKey>;
-  skipKeys?: Set<string>;
-}): Promise<Plan> {
+export async function planWith(opts: BuildOptions): Promise<Plan> {
   const { targets } = await collectTargets();
   const state = await loadState();
   return buildPlan(targets, state, opts);
@@ -84,6 +82,21 @@ export async function planAll(
   scopeOverrides?: Map<string, ScopeKey>,
 ): Promise<Plan> {
   return planWith({ scopeOverrides });
+}
+
+export async function repairPlan(opts: {
+  forceRemoveKeys?: Set<string>;
+  dropManaged?: { file: string; name: string }[];
+}): Promise<Plan> {
+  const { targets } = await collectTargets();
+  const state = await loadState();
+  const base = buildPlan(targets, state, opts);
+  const overrides = new Map<string, ScopeKey>();
+  for (const a of base.actions) {
+    if (a.needsScope) overrides.set(a.key, a.observedScope ?? a.scope);
+  }
+  if (overrides.size === 0) return base;
+  return buildPlan(targets, state, { ...opts, scopeOverrides: overrides });
 }
 
 function decodeKey(key: string): { scopeId: string; name: string } {

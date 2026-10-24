@@ -24,16 +24,26 @@ converged.
 
 `mcp-sync doctor` and `mcp-sync plan` flag duplicates:
 
+- **plugin-managed** — an agent provides the server through a plugin **and** has a managed
+  `[mcp_servers.<name>]` entry (this is what made Codex report `ai-memory` as failed).
 - **same name, multiple scopes** — e.g. `supabase` in both global and a project (possibly
   with different `project_ref`). Legit only if intentional.
 - **same server, different names** — the same url/command declared under two names.
 
-When a duplicate appears, surface it and resolve it with the user (multiple choice, one
-recommended) — never ignore it:
+When a duplicate appears, **render a multiple-choice question (one recommended) and let the
+user choose** — never ignore it and never decide silently. The recommended way is:
 
-- `mcp-sync move <name> --to <scope>` — consolidate to one scope (removes the other copy).
-- `mcp-sync remove <name> --scope <scope>` — drop one copy.
-- keep both — only when the user confirms the two are intentionally different.
+```sh
+mcp-sync repair          # finds duplicates, asks how to resolve each, then applies
+```
+
+- **plugin-managed** → remove the managed entry (keeps the plugin-provided one) *[recommended]*.
+- **same name, multiple scopes** → keep both *[recommended]*, or remove the copy in one scope.
+- **same server, different names** → remove one of the names.
+
+`mcp-sync apply --yes` also asks when duplicates exist (interactive); in non-interactive runs
+it points to `mcp-sync repair`. Manual alternatives: `mcp-sync move <name> --to <scope>` and
+`mcp-sync remove <name> --scope <scope>`.
 
 ## Drive the whole flow (create → sync → authenticate)
 
@@ -156,7 +166,7 @@ agent report the server as failed.
 | "register this project" | `mcp-sync projects add "$(git rev-parse --show-toplevel)"` |
 | "move this MCP to a project / to global" | `mcp-sync move <name> --to global\|project:<path>` |
 | "remove this MCP" | `mcp-sync remove <name> [--scope <scope>]` |
-| "duplicate MCP / it appears twice" | `mcp-sync doctor` to find them, then `move`/`remove`/keep both |
+| "duplicate MCP / it appears twice" | `mcp-sync repair` (asks how to resolve each) |
 | "undo / revert" | `mcp-sync rollback` |
 | "stop re-adding X" | `mcp-sync forget X` |
 

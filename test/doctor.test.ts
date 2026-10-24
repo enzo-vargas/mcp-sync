@@ -54,6 +54,19 @@ test("doctor exits 1 with needs-setup before setup, 0 after", () => {
   }
 });
 
+test("repair reports when there are no duplicates", () => {
+  const sb = sandbox();
+  try {
+    sb.write(".claude.json", claudeGlobal({}));
+    sb.write(".config/opencode/opencode.json", emptyOpencode());
+    const res = run(["repair"], envFor(sb));
+    assert.equal(res.code, 0);
+    assert.match(res.out, /no duplicates/);
+  } finally {
+    sb.cleanup();
+  }
+});
+
 test("refresh reinstalls the skill and then reports health", () => {
   const sb = sandbox();
   try {

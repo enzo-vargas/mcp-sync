@@ -22,9 +22,13 @@ export interface Blocked {
 }
 
 export interface Duplicate {
-  kind: "name-cross-scope" | "same-def-different-name";
+  kind: "name-cross-scope" | "same-def-different-name" | "plugin-managed";
   name: string;
   detail: string;
+  agents?: string[];
+  files?: string[];
+  scopes?: string[];
+  names?: string[];
 }
 
 export interface KeyAction {
@@ -69,6 +73,7 @@ export interface BuildOptions {
   scopeOverrides?: Map<string, ScopeKey>;
   skipKeys?: Set<string>;
   forceRemoveKeys?: Set<string>;
+  dropManaged?: { file: string; name: string }[];
 }
 
 export function buildPlan(
@@ -148,7 +153,10 @@ export function buildPlan(
     nameScopes.get(nm)!.add(scopeId(sc));
   }
 
-  plan.duplicates = findDuplicates(allKeys, nameByKey, scopeByKey, defByKey, nameScopes);
+  plan.duplicates = [
+    ...findPluginManagedDuplicates(reads, providedByTarget),
+    ...findDuplicates(allKeys, nameByKey, scopeByKey, defByKey, nameScopes),
+  ];
 
   for (const key of allKeys) {
     if (opts?.skipKeys?.has(key)) continue;
@@ -173,6 +181,28 @@ export function buildPlan(
       (t) => !providedByTarget.get(t)?.has(name),
     );
     const activeAgents = new Set(scopeTargets.map((t) => t.agent));
+
+    const drops = opts?.dropManaged?.filter((d) => d.name === name) ?? [];
+    if (drops.length) {
+      const agents: AgentId[] = [];
+      const files: string[] = [];
+      for (const d of drops) {
+        const t = scopeTargetsAll.find((tt) => tt.file === d.file);
+        if (!t) continue;
+        addOp(plan, t).remove.add(name);
+        agents.push(t.agent);
+        files.push(t.file);
+      }
+      plan.actions.push({
+        key,
+        scope,
+        name,
+        action: "remove",
+        private: false,
+        agents: [...new Set(agents)],
+        files,
+      });
+    }
     const occ = entry?.occ ?? [];
     const isPrivate = occ.length > 0 && occ.every((o) => o.target.private);
 
@@ -297,6 +327,30 @@ export function buildPlan(
   return plan;
 }
 
+function findPluginManagedDuplicates(
+  reads: Map<Target, ReadResult>,
+  providedByTarget: Map<Target, Set<string>>,
+): Duplicate[] {
+  const byName = new Map<string, { agents: Set<string>; files: Set<string> }>();
+  for (const [t, r] of reads) {
+    const prov = providedByTarget.get(t);
+    if (!prov) continue;
+    for (const name of r.servers.keys()) {
+      if (!prov.has(name)) continue;
+      if (!byName.has(name)) byName.set(name, { agents: new Set(), files: new Set() });
+      byName.get(name)!.agents.add(t.agent);
+      byName.get(name)!.files.add(t.file);
+    }
+  }
+  return [...byName.entries()].map(([name, v]) => ({
+    kind: "plugin-managed" as const,
+    name,
+    detail: `${[...v.agents].join(", ")} provides "${name}" via a plugin AND has a managed entry`,
+    agents: [...v.agents],
+    files: [...v.files],
+  }));
+}
+
 function findDuplicates(
   allKeys: Set<string>,
   nameByKey: Map<string, string>,
@@ -312,6 +366,7 @@ function findDuplicates(
         kind: "name-cross-scope",
         name: nm,
         detail: `declared in ${[...scopes].join(" and ")}`,
+        scopes: [...scopes],
       });
     }
   }
@@ -331,10 +386,13 @@ function findDuplicates(
   for (const [sid, m] of byScopeDef) {
     for (const names of m.values()) {
       if (names.size > 1) {
+        const sorted = [...names].sort();
         out.push({
           kind: "same-def-different-name",
-          name: [...names].sort().join(", "),
-          detail: `same definition in ${sid}: ${[...names].sort().join(", ")}`,
+          name: sorted.join(", "),
+          detail: `same definition in ${sid}: ${sorted.join(", ")}`,
+          scopes: [sid],
+          names: sorted,
         });
       }
     }
@@ -449,11 +507,16 @@ function recordSnapshot(
   isPrivate: boolean,
   scopeTargets: Target[],
 ) {
+  const agents = [...new Set(scopeTargets.map((t) => t.agent))];
+  if (agents.length === 0) {
+    delete plan.newSnapshot.servers[key];
+    return;
+  }
   const entry: SnapshotEntry = {
     scope,
     name,
     def,
-    agents: [...new Set(scopeTargets.map((t) => t.agent))],
+    agents,
     private: isPrivate,
   };
   plan.newSnapshot.servers[key] = entry;
