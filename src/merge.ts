@@ -33,6 +33,7 @@ export interface KeyAction {
   files: string[];
   needsScope?: boolean;
   observedScope?: ScopeKey;
+  otherScopes?: string[];
 }
 
 export interface TargetOps {
@@ -59,6 +60,7 @@ interface Occ {
 
 export interface BuildOptions {
   scopeOverrides?: Map<string, ScopeKey>;
+  skipKeys?: Set<string>;
 }
 
 export function buildPlan(
@@ -115,7 +117,18 @@ export function buildPlan(
   const allKeys = new Set<string>([...keys.keys(), ...Object.keys(state.servers)]);
   plan.knownKeys = allKeys.size;
 
+  const nameScopes = new Map<string, Set<string>>();
+  for (const k of allKeys) {
+    const e = keys.get(k);
+    const b = state.servers[k];
+    const sc = e?.scope ?? b!.scope;
+    const nm = e?.name ?? b!.name;
+    if (!nameScopes.has(nm)) nameScopes.set(nm, new Set());
+    nameScopes.get(nm)!.add(scopeId(sc));
+  }
+
   for (const key of allKeys) {
+    if (opts?.skipKeys?.has(key)) continue;
     const entry = keys.get(key);
     const base = state.servers[key];
     const scope = entry?.scope ?? base!.scope;
@@ -135,6 +148,31 @@ export function buildPlan(
     const removedBy = tracked.filter((a) => activeAgents.has(a) && !occ.some((o) => o.agent === a));
 
     if (base) {
+      const override = opts?.scopeOverrides?.get(key);
+      if (override && scopeId(override) !== scopeId(scope)) {
+        const destKey = keyId(override, name);
+        const destExisting = keys.get(destKey) ?? state.servers[destKey];
+        if (destExisting) {
+          const destDef = keys.get(destKey)?.occ[0]?.def ?? state.servers[destKey]?.def;
+          if (destDef && defsEqual(destDef, base.def)) {
+            emitRemove(plan, key, scope, name, scopeTargets, base.private, isPrivate);
+            continue;
+          }
+          plan.conflicts.push({
+            key,
+            scope,
+            name,
+            reason: `cannot move to ${scopeId(override)}: a different server named "${name}" already exists there`,
+            details: [],
+          });
+          continue;
+        }
+        const destTargets = (byScope.get(scopeId(override)) ?? []).filter((t) => !offline.has(t));
+        const destAgents = new Set(destTargets.map((t) => t.agent));
+        emitRemove(plan, key, scope, name, scopeTargets, base.private, isPrivate);
+        emitWrite(plan, destKey, override, name, base.def, undefined, false, destTargets, destAgents);
+        continue;
+      }
       const changedDefs = defs.filter((d) => !defsEqual(d, base.def));
       const presentAgents = [...new Set(occ.map((o) => o.agent))];
       if (removedBy.length > 0) {
@@ -205,6 +243,13 @@ export function buildPlan(
       const action = plan.actions[plan.actions.length - 1]!;
       action.needsScope = true;
       action.observedScope = scope;
+      const others = [...(nameScopes.get(name) ?? [])].filter((id) => id !== scopeId(scope));
+      if (others.length) {
+        action.otherScopes = others;
+        plan.notes.push(
+          `"${name}" already exists in ${others.join(", ")} — keep both, move, or cancel`,
+        );
+      }
     }
   }
 

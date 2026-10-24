@@ -16,6 +16,17 @@ fi
 echo "mcp-sync: $(command -v "$BIN")"
 
 echo
+echo "## Setup"
+if "$BIN" config 2>/dev/null | grep -q "setupComplete = true"; then
+  echo "  preferences: configured ($("$BIN" config path 2>/dev/null))"
+  SETUP=1
+else
+  echo "  preferences: NOT configured"
+  echo "  run 'mcp-sync setup' (first-run onboarding: accept defaults or walk through)"
+  SETUP=0
+fi
+
+echo
 echo "## Agents"
 "$BIN" targets 2>/dev/null || echo "  (targets unavailable)"
 
@@ -44,7 +55,9 @@ else
 fi
 
 echo
-if [ "$DRIFT" -eq 1 ]; then
+if [ "$SETUP" -eq 0 ]; then
+  echo "HEALTH: needs-setup"
+elif [ "$DRIFT" -eq 1 ]; then
   echo "HEALTH: drift"
 elif [ "$REGISTERED" -eq 0 ]; then
   echo "HEALTH: not-registered"

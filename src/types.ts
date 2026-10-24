@@ -22,6 +22,12 @@ export function scopeId(scope: ScopeKey): string {
   return scope.kind === "global" ? "global" : `project:${scope.path}`;
 }
 
+export function scopeFromId(id: string): ScopeKey {
+  if (id === "global") return { kind: "global" };
+  if (id.startsWith("project:")) return { kind: "project", path: id.slice("project:".length) };
+  throw new Error(`invalid scope id "${id}"`);
+}
+
 export function sameScope(a: ScopeKey, b: ScopeKey): boolean {
   if (a.kind !== b.kind) return false;
   if (a.kind === "project" && b.kind === "project") return a.path === b.path;

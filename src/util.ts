@@ -9,10 +9,17 @@ export function home(): string {
 }
 
 export function stateDir(): string {
-  return (
-    process.env.MCP_SYNC_STATE_DIR ||
-    path.join(home(), ".local", "state", "mcp-sync")
-  );
+  if (process.env.MCP_SYNC_STATE_DIR) return process.env.MCP_SYNC_STATE_DIR;
+  const xdg = process.env.XDG_STATE_HOME;
+  const base = xdg && path.isAbsolute(xdg) ? xdg : path.join(home(), ".local", "state");
+  return path.join(base, "mcp-sync");
+}
+
+export function configDir(): string {
+  if (process.env.MCP_SYNC_CONFIG_DIR) return process.env.MCP_SYNC_CONFIG_DIR;
+  const xdg = process.env.XDG_CONFIG_HOME;
+  const base = xdg && path.isAbsolute(xdg) ? xdg : path.join(home(), ".config");
+  return path.join(base, "mcp-sync");
 }
 
 export function exists(p: string): boolean {

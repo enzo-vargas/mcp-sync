@@ -60,7 +60,8 @@ export const RULE_BLOCK = `${BLOCK_START}
 
 At the start of a session, load the \`mcp-sync\` Agent Skill and run its setup and health
 checkup before other work whenever the user works with MCP servers. The checkup is
-read-only. Never apply MCP changes without explicit confirmation.
+read-only. If it reports \`needs-setup\`, run \`mcp-sync setup\` first. Never apply MCP changes
+without explicit confirmation.
 
 When the user adds a new MCP, always ask whether it should be global or project-scoped
 before running any add command. There is no default: the scope is the user's choice.

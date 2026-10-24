@@ -3,14 +3,22 @@ import process from "node:process";
 import { execFileSync } from "node:child_process";
 import * as readline from "node:readline/promises";
 import type { ServerDef, ScopeKey } from "./types.js";
-import { scopeId } from "./types.js";
+import { keyId, scopeFromId, scopeId } from "./types.js";
 import type { KeyAction } from "./merge.js";
-import { planAll, applyPlan, rollback, collectTargets } from "./engine.js";
+import { planAll, planWith, applyPlan, rollback, collectTargets, moveServer } from "./engine.js";
 import type { Plan } from "./merge.js";
 import { summarize } from "./merge.js";
 import { authChecklist, authStatus } from "./auth.js";
 import { loadProjects, saveProjects, loadState, saveState } from "./state.js";
 import { skillInstall, skillUninstall, skillStatus } from "./skill.js";
+import {
+  DEFAULT_PREFS,
+  PREF_KEYS,
+  loadPrefsFile,
+  savePrefsFile,
+  setPref,
+  prefsPath,
+} from "./prefs.js";
 import { expandHome, rel } from "./util.js";
 import { readFileSync } from "node:fs";
 import { existsSync } from "node:fs";
@@ -134,24 +142,38 @@ function parseScopeFlag(value: string): ScopeKey {
   throw new Error(`invalid --scope "${value}" (use global | project | project:<path>)`);
 }
 
+async function ask(question: string): Promise<string> {
+  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
+  try {
+    return (await rl.question(question)).trim().toLowerCase();
+  } finally {
+    rl.close();
+  }
+}
+
+type ConflictStrategy = "keep-both" | "move" | "cancel";
+
 async function resolveScopes(
   pending: KeyAction[],
   flags: Record<string, string | boolean>,
-): Promise<Map<string, ScopeKey>> {
+): Promise<{ overrides: Map<string, ScopeKey>; skip: Set<string> }> {
+  const file = await loadPrefsFile();
+  const prefs = file.prefs;
   const overrides = new Map<string, ScopeKey>();
-  if (typeof flags.scope === "string") {
-    const scope = parseScopeFlag(flags.scope);
-    for (const a of pending) overrides.set(a.key, scope);
-    return overrides;
-  }
-  if (!process.stdin.isTTY) {
-    throw new Error(
-      `new server(s) need an explicit scope: ${pending.map((a) => a.name).join(", ")}. ` +
-        `Pass --scope global|project[:path] (there is no default).`,
-    );
-  }
-  const projects = await loadProjects();
+  const skip = new Set<string>();
+  const tty = process.stdin.isTTY;
+
+  const flagScope = typeof flags.scope === "string" ? parseScopeFlag(flags.scope) : null;
+  const flagConflict: ConflictStrategy | null = flags["keep-both"]
+    ? "keep-both"
+    : flags.move
+      ? "move"
+      : flags.cancel
+        ? "cancel"
+        : null;
+
   const root = currentProjectRoot();
+  const projects = await loadProjects();
   const choices: { label: string; scope: ScopeKey }[] = [
     { label: "global (every project)", scope: { kind: "global" } },
   ];
@@ -159,27 +181,82 @@ async function resolveScopes(
     choices.push({ label: `project ${p}`, scope: { kind: "project", path: p } });
   }
 
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    for (const a of pending) {
-      console.log(`\nNew MCP "${a.name}" (found in ${scopeId(a.observedScope ?? a.scope)}).`);
-      console.log("Where should it live? There is no default — choose:");
-      choices.forEach((c, i) => console.log(`  [${i + 1}] ${c.label}`));
-      console.log(`  [s] skip`);
-      const answer = (await rl.question("> ")).trim().toLowerCase();
-      if (answer === "s" || answer === "") continue;
-      const idx = Number.parseInt(answer, 10) - 1;
-      const chosen = choices[idx];
-      if (!chosen) {
-        console.log("  invalid choice, skipping");
-        continue;
-      }
-      overrides.set(a.key, chosen.scope);
+  for (const a of pending) {
+    let chosen: ScopeKey | null = flagScope;
+    if (!chosen) {
+      if (prefs.newServerScope === "global") chosen = { kind: "global" };
+      else if (prefs.newServerScope === "project") chosen = { kind: "project", path: root };
     }
-  } finally {
-    rl.close();
+
+    const conflict = (a.otherScopes?.length ?? 0) > 0;
+    let strategy: ConflictStrategy | null = conflict ? flagConflict : null;
+    if (conflict && !strategy && prefs.onScopeConflict === "keep-both") strategy = "keep-both";
+    if (conflict && !strategy && prefs.onScopeConflict === "move") strategy = "move";
+
+    if (tty && (!chosen || (conflict && !strategy))) {
+      console.log(`\nNew MCP "${a.name}" (found in ${scopeId(a.observedScope ?? a.scope)}).`);
+      if (conflict) {
+        console.log(`  It already exists in: ${a.otherScopes!.join(", ")}`);
+        console.log("  [1] keep both");
+        console.log("  [2] move it (remove the other, this becomes the only copy)");
+        console.log("  [3] cancel");
+        const ans = await ask("> ");
+        strategy = ans === "1" ? "keep-both" : ans === "2" ? "move" : "cancel";
+        if (!chosen) {
+          if (strategy === "keep-both") chosen = a.observedScope ?? a.scope;
+          else {
+            choices.forEach((c, i) => console.log(`  target [${i + 1}] ${c.label}`));
+            const t = Number.parseInt(await ask("> "), 10) - 1;
+            chosen = choices[t]?.scope ?? a.observedScope ?? a.scope;
+          }
+        }
+      } else {
+        console.log("Where should it live? There is no default — choose:");
+        choices.forEach((c, i) => console.log(`  [${i + 1}] ${c.label}`));
+        console.log("  [s] skip");
+        const ans = await ask("> ");
+        if (ans === "s" || ans === "") {
+          skip.add(a.key);
+          continue;
+        }
+        const idx = Number.parseInt(ans, 10) - 1;
+        chosen = choices[idx]?.scope ?? null;
+        if (!chosen) {
+          skip.add(a.key);
+          continue;
+        }
+      }
+    }
+
+    if (!chosen) {
+      throw new Error(
+        `new server "${a.name}" needs an explicit scope. ` +
+          `Pass --scope global|project[:path]${conflict ? " and --keep-both|--move" : ""}.`,
+      );
+    }
+
+    if (conflict && !strategy) {
+      throw new Error(
+        `"${a.name}" already exists in ${a.otherScopes!.join(", ")}. ` +
+          `Pass --keep-both or --move (or run interactively).`,
+      );
+    }
+
+    if (strategy === "cancel") {
+      skip.add(a.key);
+      continue;
+    }
+    if (strategy === "move") {
+      overrides.set(a.key, chosen);
+      for (const other of a.otherScopes ?? []) {
+        overrides.set(keyId(scopeFromId(other), a.name), chosen);
+      }
+      continue;
+    }
+    overrides.set(a.key, chosen);
   }
-  return overrides;
+
+  return { overrides, skip };
 }
 
 async function cmdPlan(): Promise<void> {
@@ -193,8 +270,8 @@ async function cmdApply(argv: string[]): Promise<void> {
 
   const pending = plan.actions.filter((a) => a.needsScope);
   if (flags.yes && pending.length > 0) {
-    const overrides = await resolveScopes(pending, flags);
-    if (overrides.size > 0) plan = await planAll(overrides);
+    const { overrides, skip } = await resolveScopes(pending, flags);
+    plan = await planWith({ scopeOverrides: overrides, skipKeys: skip });
     const still = plan.actions.filter((a) => a.needsScope);
     if (still.length > 0) {
       throw new Error(
@@ -210,13 +287,17 @@ async function cmdApply(argv: string[]): Promise<void> {
     return;
   }
   renderPlan(plan);
-  if (!flags.yes) {
+  const prefsFile = await loadPrefsFile();
+  const prefs = prefsFile.prefs;
+  if (!flags.yes && prefs.requireApplyConfirmation) {
     console.log("\n(dry run — re-run with --yes to apply)");
     return;
   }
   const result = await applyPlan(plan, {
     yes: true,
     allowMassDelete: Boolean(flags["allow-mass-delete"]),
+    secretLeakCheck: prefs.secretLeakCheck,
+    massDeleteThreshold: prefs.massDeleteThreshold,
   });
   console.log(`\napplied: +${adds} ~${updates} -${removes}`);
   for (const f of result.written) console.log(`  wrote ${rel(f)}`);
@@ -352,6 +433,140 @@ async function cmdSkill(argv: string[]): Promise<void> {
   throw new Error("usage: mcp-sync skill install|uninstall|status [--target agents|claude|opencode|all] [--copy] [--no-rules] [--force]");
 }
 
+async function cmdSetup(argv: string[]): Promise<void> {
+  const { flags } = parseArgs(argv);
+  const file = await loadPrefsFile();
+
+  const explicit = PREF_KEYS.some((k) => typeof flags[k] === "string");
+  if (file.setupComplete && !explicit && !flags.force) {
+    console.log(`already configured — ${rel(prefsPath())}`);
+    console.log("use `mcp-sync config` to read, `mcp-sync config set <k> <v>` to change.");
+    return;
+  }
+
+  const prefs = { ...file.prefs };
+  if (explicit) {
+    for (const k of PREF_KEYS) {
+      const v = flags[k];
+      if (typeof v === "string") {
+        const { coercePref } = await import("./prefs.js");
+        (prefs as unknown as Record<string, unknown>)[k] = coercePref(k, v);
+      }
+    }
+  } else if (flags.defaults || !process.stdin.isTTY) {
+    console.log("accepting recommended defaults");
+  } else {
+    console.log("mcp-sync setup — accept the recommended defaults, or walk through?");
+    console.log("  [1] accept recommended defaults (fast)");
+    console.log("  [2] walk through");
+    const mode = await ask("> ");
+    if (mode === "2") {
+      prefs.newServerScope = (await ask(
+        `New MCP scope: ask|global|project [${prefs.newServerScope}]: `,
+      )) as typeof prefs.newServerScope || prefs.newServerScope;
+      prefs.requireApplyConfirmation = bool(
+        await ask(`Require confirmation before apply [${prefs.requireApplyConfirmation}]: `),
+        prefs.requireApplyConfirmation,
+      );
+      prefs.secretLeakCheck = bool(
+        await ask(`Scan for leaked secrets after writing [${prefs.secretLeakCheck}]: `),
+        prefs.secretLeakCheck,
+      );
+      const th = await ask(`Mass-delete threshold [${prefs.massDeleteThreshold}]: `);
+      const n = Number.parseInt(th, 10);
+      if (Number.isInteger(n) && n >= 0) prefs.massDeleteThreshold = n;
+      prefs.rulesEnabled = bool(
+        await ask(`Install the rule snippet (session-start checkup) [${prefs.rulesEnabled}]: `),
+        prefs.rulesEnabled,
+      );
+    }
+  }
+
+  const next = { ...file, version: 1, setupComplete: true, prefs };
+  await savePrefsFile(next);
+  console.log(`\nwrote ${rel(prefsPath())}`);
+  for (const k of PREF_KEYS) console.log(`  ${k} = ${JSON.stringify(prefs[k])}`);
+
+  if (prefs.rulesEnabled) {
+    const target = prefs.skillTargets.join(",") || "agents";
+    console.log(`\ninstalling skill (target=${target})...`);
+    try {
+      const res = await skillInstall({
+        target,
+        copy: false,
+        withRules: true,
+        force: false,
+      });
+      for (const p of res.installed) console.log(`  skill: ${rel(p)}`);
+      for (const p of res.rules) console.log(`  rule: ${rel(p)}`);
+    } catch (e) {
+      console.log(`  skipped: ${(e as Error).message}`);
+    }
+  }
+}
+
+function bool(value: string, fallback: boolean): boolean {
+  if (value === "" ) return fallback;
+  return value === "true" || value === "y" || value === "yes";
+}
+
+async function cmdConfig(argv: string[]): Promise<void> {
+  const { positional } = parseArgs(argv);
+  const sub = positional[0];
+  if (sub === "path") {
+    console.log(prefsPath());
+    return;
+  }
+  if (sub === "get" && positional[1]) {
+    const file = await loadPrefsFile();
+    const key = positional[1];
+    if (!PREF_KEYS.includes(key as keyof typeof file.prefs)) {
+      throw new Error(`unknown preference "${key}"`);
+    }
+    console.log(JSON.stringify((file.prefs as unknown as Record<string, unknown>)[key]));
+    return;
+  }
+  if (sub === "set" && positional[1] && positional[2] !== undefined) {
+    const file = await setPref(positional[1], positional.slice(2).join(" "));
+    console.log(`${positional[1]} = ${JSON.stringify((file.prefs as unknown as Record<string, unknown>)[positional[1]])}`);
+    return;
+  }
+  const file = await loadPrefsFile();
+  console.log(`# ${prefsPath()}`);
+  console.log(`setupComplete = ${file.setupComplete}`);
+  const defaults = DEFAULT_PREFS as unknown as Record<string, unknown>;
+  for (const k of PREF_KEYS) {
+    const cur = (file.prefs as unknown as Record<string, unknown>)[k];
+    const changed = JSON.stringify(cur) !== JSON.stringify(defaults[k]) ? "  (changed)" : "";
+    console.log(`  ${k} = ${JSON.stringify(cur)}${changed}`);
+  }
+}
+
+async function cmdMove(argv: string[]): Promise<void> {
+  const { positional, flags } = parseArgs(argv);
+  const name = positional[0];
+  if (!name) throw new Error("usage: mcp-sync move <name> --to global|project[:path]");
+  const to = typeof flags.to === "string" ? parseScopeFlag(flags.to) : null;
+  if (!to) throw new Error("move requires --to global|project[:path]");
+
+  const plan = await moveServer(name, to, typeof flags.from === "string" ? flags.from : undefined);
+  if (!hasDrift(plan)) {
+    console.log(`"${name}" is already in ${scopeId(to)}`);
+    return;
+  }
+  renderPlan(plan);
+  const prefs = (await loadPrefsFile()).prefs;
+  const result = await applyPlan(plan, {
+    yes: true,
+    allowMassDelete: Boolean(flags["allow-mass-delete"]),
+    secretLeakCheck: prefs.secretLeakCheck,
+    massDeleteThreshold: prefs.massDeleteThreshold,
+  });
+  console.log(`\nmoved "${name}" to ${scopeId(to)}`);
+  for (const f of result.written) console.log(`  wrote ${rel(f)}`);
+  if (result.errors.length) for (const e of result.errors) console.log(`  ! ${e}`);
+}
+
 async function cmdCheck(): Promise<void> {
   const plan = await planAll();
   if (hasDrift(plan)) {
@@ -366,8 +581,11 @@ function usage(): void {
   console.log(`mcp-sync — reconcile MCP servers across opencode, Claude Code and Codex
 
 Usage:
+  mcp-sync setup [--defaults] [--<pref> <value>]   onboarding (first run)
+  mcp-sync config [get <k> | set <k> <v> | path]   read/change preferences
   mcp-sync plan                       show the reconcile plan (no writes)
-  mcp-sync apply [--yes] [--scope global|project[:path]] [--allow-mass-delete]
+  mcp-sync apply [--yes] [--scope global|project[:path]] [--keep-both|--move] [--allow-mass-delete]
+  mcp-sync move <name> --to global|project[:path] [--from <scope>]
   mcp-sync status                     auth status per agent
   mcp-sync rollback [timestamp]
   mcp-sync projects add|rm|ls|suggest [path]
@@ -400,6 +618,15 @@ async function main(): Promise<void> {
       break;
     case "skill":
       await cmdSkill(rest);
+      break;
+    case "setup":
+      await cmdSetup(rest);
+      break;
+    case "config":
+      await cmdConfig(rest);
+      break;
+    case "move":
+      await cmdMove(rest);
       break;
     case "check":
       await cmdCheck();

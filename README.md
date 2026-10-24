@@ -54,6 +54,35 @@ codex mcp login <nome>
 mcp-sync status
 ```
 
+## Setup e preferências
+
+Na primeira vez, rode o onboarding. Ele pergunta uma vez e grava as preferências em
+`~/.config/mcp-sync/config.json` (respeitando `XDG_CONFIG_HOME`):
+
+```sh
+mcp-sync setup          # [1] aceitar defaults recomendados  [2] passar pelas perguntas
+mcp-sync setup --defaults
+mcp-sync config         # mostra as preferências + o caminho do arquivo
+mcp-sync config get newServerScope
+mcp-sync config set onScopeConflict move
+mcp-sync config path
+```
+
+Preferências (defaults recomendados):
+
+| Chave | Default | Efeito |
+|---|---|---|
+| `newServerScope` | `ask` | ao adicionar MCP novo, sempre perguntar (`ask`), ou fixar `global`/`project` |
+| `onScopeConflict` | `ask` | quando o nome já existe em outro escopo: `ask` / `move` / `keep-both` |
+| `requireApplyConfirmation` | `true` | `apply` só escreve com `--yes` |
+| `secretLeakCheck` | `true` | varre segredos após escrever |
+| `massDeleteThreshold` | `5` | remoções acima disso exigem `--allow-mass-delete` |
+| `skillTargets` | `["agents"]` | roots globais da skill |
+| `rulesEnabled` | `true` | instalar o snippet de regra (checkup no início da sessão) |
+
+Completo (`setupComplete: true`), o `mcp-sync` **nunca pergunta** as preferências de novo:
+leia/mude com `config` ou editando o arquivo.
+
 ## Escopo: não existe default
 
 Ao adicionar um MCP novo, **não há escopo padrão** — é escolha do usuário (global ou
@@ -71,6 +100,17 @@ mcp-sync apply --yes --scope "project:/caminho/do/repo"
 
 Se o servidor foi declarado no escopo errado (ex.: o default `local` do `claude mcp add`),
 escolher outro escopo o **reloca**: remove do escopo antigo e adiciona no escolhido.
+
+Se o **nome já existir em outro escopo**, a escolha aparece **só nesse momento**:
+`keep both` (mantém nos dois) ou `move` (remove o outro). Nada disso é configurado no
+onboarding.
+
+Para relocar um servidor **já sincronizado**, use o comando dedicado (o `apply --scope` não
+mexe em servidor já sincronizado):
+
+```sh
+mcp-sync move <nome> --to "project:/caminho/do/repo" [--from global]
+```
 
 Ao adicionar nativamente, escolha o escopo correto na hora:
 

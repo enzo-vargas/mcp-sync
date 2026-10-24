@@ -40,6 +40,29 @@ It prints a `HEALTH:` verdict line:
 
 The checkup never writes. Never run `apply` as part of the checkup.
 
+## First run: onboarding
+
+If the checkup reports `HEALTH: needs-setup` (or `mcp-sync config` shows
+`setupComplete = false`), run the onboarding **before** syncing anything:
+
+```sh
+mcp-sync setup          # interactively: accept recommended defaults, or walk through
+mcp-sync setup --defaults
+```
+
+Preferences live in `~/.config/mcp-sync/config.json` and are written once. After setup,
+never prompt for them again: read with `mcp-sync config`, change with
+`mcp-sync config set <key> <value>`, or by asking the user to edit the file. Only re-run
+onboarding if the user explicitly asks (or with `mcp-sync setup --force`).
+
+Key preferences:
+
+- `newServerScope` (`ask` | `global` | `project`) — default `ask`: always ask for a new MCP.
+- `onScopeConflict` (`ask` | `move` | `keep-both`) — what to offer when a name already
+  exists in another scope; `ask` presents the choice at conflict time.
+- `requireApplyConfirmation` (default `true`) — `apply` is a dry run unless `--yes`.
+- `secretLeakCheck`, `massDeleteThreshold`, `skillTargets`, `rulesEnabled`.
+
 ## Resolve the binary
 
 Prefer `mcp-sync` from PATH. If missing, install it:
@@ -71,6 +94,7 @@ by plugins, and Hermes.
 | "remove MCP X" | remove it in one agent natively, then `mcp-sync plan` + `apply` (it propagates and tombstones) |
 | "authenticate / log into X" | `mcp-sync status`, then the native command it prints (`opencode mcp auth`, `codex mcp login`, Claude `/mcp`) |
 | "register this project" | `mcp-sync projects add "$(git rev-parse --show-toplevel)"` |
+| "move this MCP to a project / to global" | `mcp-sync move <name> --to global\|project:<path>` |
 | "undo / revert" | `mcp-sync rollback` |
 | "stop re-adding X" | `mcp-sync forget X` |
 
@@ -97,6 +121,12 @@ If the server was already declared in the wrong scope (e.g. Claude's `local` def
 `mcp-sync apply --yes` and answer the interactive prompt, or pass
 `mcp-sync apply --yes --scope global` / `--scope project:<path>`. `apply` refuses to place a
 new server without an explicit scope.
+
+**If the name already exists in another scope** (e.g. it is global and the user wants it in
+a project), `apply` asks at that moment — only then — whether to **keep both** or **move**
+it. If the user wants an existing (already synced) server relocated, use
+`mcp-sync move <name> --to global|project:<path>`; `apply --scope` never touches servers
+that are already synced.
 
 ## Safety rules (mandatory)
 

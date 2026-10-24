@@ -5,6 +5,7 @@ import { agentTargets } from "./agents.js";
 import type { Plan } from "./merge.js";
 import { buildPlan } from "./merge.js";
 import type { ScopeKey } from "./types.js";
+import { scopeId } from "./types.js";
 import type { State } from "./state.js";
 import { loadState, saveState, loadProjects } from "./state.js";
 import { scanForSecrets } from "./secrets.js";
@@ -22,6 +23,8 @@ import {
 export interface ApplyOptions {
   yes: boolean;
   allowMassDelete: boolean;
+  secretLeakCheck?: boolean;
+  massDeleteThreshold?: number;
 }
 
 export interface ApplyResult {
@@ -37,12 +40,62 @@ export async function collectTargets(): Promise<{ targets: Target[]; projects: s
   return { targets: agentTargets(projects), projects };
 }
 
+export async function planWith(opts: {
+  scopeOverrides?: Map<string, ScopeKey>;
+  skipKeys?: Set<string>;
+}): Promise<Plan> {
+  const { targets } = await collectTargets();
+  const state = await loadState();
+  return buildPlan(targets, state, opts);
+}
+
 export async function planAll(
   scopeOverrides?: Map<string, ScopeKey>,
 ): Promise<Plan> {
+  return planWith({ scopeOverrides });
+}
+
+function decodeKey(key: string): { scopeId: string; name: string } {
+  const idx = key.indexOf("\u0000");
+  return { scopeId: key.slice(0, idx), name: key.slice(idx + 1) };
+}
+
+export async function moveServer(
+  name: string,
+  to: ScopeKey,
+  fromScopeId?: string,
+): Promise<Plan> {
   const { targets } = await collectTargets();
   const state = await loadState();
-  return buildPlan(targets, state, { scopeOverrides });
+  const base = buildPlan(targets, state);
+
+  const candidates = new Set<string>();
+  for (const [k, v] of Object.entries(state.servers)) {
+    if (v.name === name) candidates.add(k);
+  }
+  for (const a of base.actions) {
+    if (a.name === name) candidates.add(a.key);
+  }
+
+  let filtered = [...candidates];
+  if (fromScopeId) filtered = filtered.filter((k) => decodeKey(k).scopeId === fromScopeId);
+  if (filtered.length === 0) {
+    throw new Error(`no server named "${name}" found${fromScopeId ? ` in ${fromScopeId}` : ""}`);
+  }
+
+  const others = filtered.filter((k) => decodeKey(k).scopeId !== scopeId(to));
+  if (others.length === 0) {
+    throw new Error(`"${name}" is already in ${scopeId(to)}`);
+  }
+  if (others.length > 1) {
+    throw new Error(
+      `"${name}" exists in multiple scopes: ${others.map((k) => decodeKey(k).scopeId).join(", ")}; pass --from`,
+    );
+  }
+
+  const overrides = new Map<string, ScopeKey>();
+  for (const k of filtered) overrides.set(k, to);
+  return buildPlan(targets, state, { scopeOverrides: overrides });
 }
 
 function backupsRoot(): string {
@@ -74,8 +127,9 @@ export async function applyPlan(
   }
 
   const distinctRemoves = plan.actions.filter((a) => a.action === "remove").length;
+  const threshold = opts.massDeleteThreshold ?? 5;
   if (
-    distinctRemoves > 5 ||
+    distinctRemoves > threshold ||
     (plan.knownKeys > 0 && distinctRemoves / plan.knownKeys > 0.5 && distinctRemoves > 1)
   ) {
     if (!opts.allowMassDelete) {
@@ -105,7 +159,7 @@ export async function applyPlan(
         result.errors.push(`${rel(ops.target.file)}: ${(e as Error).message}`);
         continue;
       }
-      const leaks = scanForSecrets(next);
+      const leaks = opts.secretLeakCheck === false ? [] : scanForSecrets(next);
       if (leaks.length) {
         result.leaks.push(
           `${rel(ops.target.file)}:${leaks[0]!.line} (${leaks[0]!.reason})`,
