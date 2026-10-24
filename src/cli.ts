@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 import process from "node:process";
 import { execFileSync } from "node:child_process";
-import * as readline from "node:readline/promises";
+import { ask, askChoice } from "./prompt.js";
 import type { ServerDef, ScopeKey } from "./types.js";
 import { keyId, scopeFromId, scopeId } from "./types.js";
 import type { KeyAction } from "./merge.js";
@@ -143,15 +143,6 @@ function parseScopeFlag(value: string): ScopeKey {
   throw new Error(`invalid --scope "${value}" (use global | project | project:<path>)`);
 }
 
-async function ask(question: string): Promise<string> {
-  const rl = readline.createInterface({ input: process.stdin, output: process.stdout });
-  try {
-    return (await rl.question(question)).trim().toLowerCase();
-  } finally {
-    rl.close();
-  }
-}
-
 type ConflictStrategy = "keep-both" | "move" | "cancel";
 
 async function resolveScopes(
@@ -197,31 +188,47 @@ async function resolveScopes(
     if (tty && (!chosen || (conflict && !strategy))) {
       console.log(`\nNew MCP "${a.name}" (found in ${scopeId(a.observedScope ?? a.scope)}).`);
       if (conflict) {
-        console.log(`  It already exists in: ${a.otherScopes!.join(", ")}`);
-        console.log("  [1] keep both");
-        console.log("  [2] move it (remove the other, this becomes the only copy)");
-        console.log("  [3] cancel");
-        const ans = await ask("> ");
-        strategy = ans === "1" ? "keep-both" : ans === "2" ? "move" : "cancel";
+        strategy = await askChoice<ConflictStrategy>(
+          `  It already exists in: ${a.otherScopes!.join(", ")}. What should happen?`,
+          [
+            { label: "keep both (leave the other one in place)", value: "keep-both", recommended: true },
+            { label: "move it (remove the other, this becomes the only copy)", value: "move" },
+            { label: "cancel", value: "cancel" },
+          ],
+        );
         if (!chosen) {
-          if (strategy === "keep-both") chosen = a.observedScope ?? a.scope;
-          else {
-            choices.forEach((c, i) => console.log(`  target [${i + 1}] ${c.label}`));
-            const t = Number.parseInt(await ask("> "), 10) - 1;
-            chosen = choices[t]?.scope ?? a.observedScope ?? a.scope;
+          if (strategy === "keep-both") {
+            chosen = a.observedScope ?? a.scope;
+          } else {
+            const recScope = a.observedScope ?? a.scope;
+            chosen = await askChoice<ScopeKey>(
+              "  Where should it live?",
+              choices.map((c) => ({
+                label: c.label,
+                value: c.scope,
+                recommended: scopeId(c.scope) === scopeId(recScope),
+              })),
+            );
           }
         }
       } else {
-        console.log("Where should it live? There is no default — choose:");
-        choices.forEach((c, i) => console.log(`  [${i + 1}] ${c.label}`));
-        console.log("  [s] skip");
-        const ans = await ask("> ");
-        if (ans === "s" || ans === "") {
+        const recScope = a.observedScope ?? a.scope;
+        const pick = await askChoice<string>(
+          "  Where should it live?",
+          [
+            ...choices.map((c, i) => ({
+              label: c.label,
+              value: String(i),
+              recommended: scopeId(c.scope) === scopeId(recScope),
+            })),
+            { label: "skip for now", value: "skip" },
+          ],
+        );
+        if (pick === "skip") {
           skip.add(a.key);
           continue;
         }
-        const idx = Number.parseInt(ans, 10) - 1;
-        chosen = choices[idx]?.scope ?? null;
+        chosen = choices[Number.parseInt(pick, 10)]?.scope ?? null;
         if (!chosen) {
           skip.add(a.key);
           continue;
@@ -457,28 +464,50 @@ async function cmdSetup(argv: string[]): Promise<void> {
   } else if (flags.defaults || !process.stdin.isTTY) {
     console.log("accepting recommended defaults");
   } else {
-    console.log("mcp-sync setup — accept the recommended defaults, or walk through?");
-    console.log("  [1] accept recommended defaults (fast)");
-    console.log("  [2] walk through");
-    const mode = await ask("> ");
-    if (mode === "2") {
-      prefs.newServerScope = (await ask(
-        `New MCP scope: ask|global|project [${prefs.newServerScope}]: `,
-      )) as typeof prefs.newServerScope || prefs.newServerScope;
-      prefs.requireApplyConfirmation = bool(
-        await ask(`Require confirmation before apply [${prefs.requireApplyConfirmation}]: `),
-        prefs.requireApplyConfirmation,
+    const mode = await askChoice<"fast" | "walk">(
+      "mcp-sync setup — how do you want to configure?",
+      [
+        { label: "accept the recommended defaults (fast)", value: "fast", recommended: true },
+        { label: "walk through the preferences", value: "walk" },
+      ],
+    );
+    if (mode === "walk") {
+      prefs.newServerScope = await askChoice(
+        "\nWhen you add a new MCP, what should the scope be?",
+        [
+          { label: "ask me every time (no default)", value: "ask", recommended: true },
+          { label: "always global", value: "global" },
+          { label: "always the current project", value: "project" },
+        ],
       );
-      prefs.secretLeakCheck = bool(
-        await ask(`Scan for leaked secrets after writing [${prefs.secretLeakCheck}]: `),
-        prefs.secretLeakCheck,
+      prefs.requireApplyConfirmation = await askChoice(
+        "\nRequire confirmation (`--yes`) before apply writes?",
+        [
+          { label: "yes, always confirm", value: true, recommended: true },
+          { label: "no, apply directly", value: false },
+        ],
       );
-      const th = await ask(`Mass-delete threshold [${prefs.massDeleteThreshold}]: `);
-      const n = Number.parseInt(th, 10);
-      if (Number.isInteger(n) && n >= 0) prefs.massDeleteThreshold = n;
-      prefs.rulesEnabled = bool(
-        await ask(`Install the rule snippet (session-start checkup) [${prefs.rulesEnabled}]: `),
-        prefs.rulesEnabled,
+      prefs.secretLeakCheck = await askChoice(
+        "\nScan for leaked secrets after writing?",
+        [
+          { label: "yes", value: true, recommended: true },
+          { label: "no", value: false },
+        ],
+      );
+      prefs.massDeleteThreshold = await askChoice(
+        "\nHow many removals before requiring --allow-mass-delete?",
+        [
+          { label: "5 (recommended)", value: 5, recommended: true },
+          { label: "3", value: 3 },
+          { label: "10", value: 10 },
+        ],
+      );
+      prefs.rulesEnabled = await askChoice(
+        "\nInstall the rule snippet (session-start checkup + scope question)?",
+        [
+          { label: "yes", value: true, recommended: true },
+          { label: "no", value: false },
+        ],
       );
     }
   }
@@ -504,11 +533,6 @@ async function cmdSetup(argv: string[]): Promise<void> {
       console.log(`  skipped: ${(e as Error).message}`);
     }
   }
-}
-
-function bool(value: string, fallback: boolean): boolean {
-  if (value === "" ) return fallback;
-  return value === "true" || value === "y" || value === "yes";
 }
 
 async function cmdConfig(argv: string[]): Promise<void> {

@@ -20,6 +20,19 @@ This skill does not replace the native `mcp add` commands — the user still int
 server with the agent's own command. mcp-sync then propagates it and keeps the agents
 converged.
 
+## How to ask the user (mandatory)
+
+Every question you ask about mcp-sync must be a **multiple-choice question with exactly one
+option marked as recommended**, so the user only has to pick one and press enter — never
+make them type a free-form answer.
+
+- Use your client's selectable/ask menu when it has one (e.g. opencode's `question` tool),
+  with the recommended option first and labelled "(recommended)".
+- Otherwise, print a short numbered list and mark exactly one `(recommended)`.
+- Always include a recommended option; if a safe/canonical choice exists, recommend it.
+- For a new MCP's scope, recommend the scope where it currently lives (the least
+  surprising), but still require the user to confirm.
+
 ## Session checkup (do this first)
 
 When this skill loads, run the read-only checkup and report a short summary:

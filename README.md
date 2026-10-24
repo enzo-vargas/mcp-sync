@@ -85,6 +85,22 @@ Preferências (defaults recomendados):
 Completo (`setupComplete: true`), o `mcp-sync` **nunca pergunta** as preferências de novo:
 leia/mude com `config` ou editando o arquivo.
 
+### Perguntas são de múltipla escolha
+
+Toda pergunta do `mcp-sync` (e da skill) é apresentada como **múltipla escolha com uma opção
+recomendada** — você seleciona e dá enter, sem digitar texto. No CLI:
+
+```
+mcp-sync setup — how do you want to configure?
+  [1] accept the recommended defaults (fast)  (recommended)
+  [2] walk through the preferences
+> (Enter = 1)
+```
+
+Enter aceita a recomendada; digitar o número escolhe outra. A skill instrui o agente a usar
+o menu de seleção do cliente (ex.: `question` do opencode) com uma opção marcada
+"(recommended)".
+
 ## Escopo: não existe default
 
 Ao adicionar um MCP novo, **não há escopo padrão** — é escolha do usuário (global ou

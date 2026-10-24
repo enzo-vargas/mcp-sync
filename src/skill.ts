@@ -65,6 +65,9 @@ without explicit confirmation.
 
 When the user adds a new MCP, always ask whether it should be global or project-scoped
 before running any add command. There is no default: the scope is the user's choice.
+
+Ask every mcp-sync question as a multiple-choice question with exactly one option marked
+"recommended", so the user can just pick one and press enter instead of typing an answer.
 ${BLOCK_END}`;
 
 function resolveTargets(target: string): SkillTargetId[] {
