@@ -1,0 +1,77 @@
+<!DOCTYPE html>
+<html lang="pt-BR">
+<head>
+<meta charset="utf-8">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Architects+Daughter&family=Caveat:wght@500;600&family=JetBrains+Mono:wght@400&display=swap" rel="stylesheet">
+<style>html,body{margin:0;padding:0;background:#FCFBF8}svg{display:block}</style>
+</head>
+<body>
+<svg width="1280" height="640" viewBox="0 0 1280 640" xmlns="http://www.w3.org/2000/svg" fill="none">
+  <defs>
+    <!-- hand-drawn wobble -->
+    <filter id="sketch" x="-6%" y="-6%" width="112%" height="112%">
+      <feTurbulence type="fractalNoise" baseFrequency="0.028" numOctaves="2" seed="7" result="n"/>
+      <feDisplacementMap in="SourceGraphic" in2="n" scale="2.6" xChannelSelector="R" yChannelSelector="G"/>
+    </filter>
+    <marker id="tick" viewBox="0 0 12 12" refX="6" refY="6" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+      <path d="M 1 1 L 11 6 L 1 11" stroke="#3f3f46" stroke-width="1.5" stroke-linecap="round" fill="none"/>
+    </marker>
+  </defs>
+
+  <rect width="1280" height="640" fill="#FCFBF8"/>
+
+  <!-- ============================================================
+       COLUNA ESQUERDA: assinatura + titulo + descricao
+       bloco de tinta: y 229..411  (centro 320)
+       ============================================================ -->
+  <g fill="#a1a1aa">
+    <g transform="translate(112,225) scale(1.25)">
+      <path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0 0 16 8c0-4.42-3.58-8-8-8z"/>
+    </g>
+    <text x="141" y="240" font-family="Caveat, cursive" font-size="26">Enzo Vargas</text>
+  </g>
+
+  <text x="112" y="297" font-family="'Architects Daughter', cursive" font-size="64" fill="#1c1c1e">mcp-sync</text>
+  <g filter="url(#sketch)" stroke="#3f3f46" stroke-width="1.6" stroke-linecap="round">
+    <path d="M 112 322 c 58 6 118 6 178 -2"/>
+  </g>
+  <g font-family="Caveat, cursive" fill="#52525b">
+    <text x="113" y="372" font-size="33">uma declaração dos servidores MCP,</text>
+    <text x="113" y="410" font-size="33">todos os agentes em sync.</text>
+  </g>
+
+  <!-- ============================================================
+       COLUNA DIREITA: o desenho
+       bloco: x 644..1166, y 211..429  (centros 905 / 320)
+       ============================================================ -->
+  <g filter="url(#sketch)" stroke="#3f3f46" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round">
+    <!-- hub -->
+    <ellipse cx="740" cy="320" rx="96" ry="76"/>
+    <!-- agentes -->
+    <rect x="894" y="211" width="272" height="66" rx="4"/>
+    <rect x="894" y="287" width="272" height="66" rx="4"/>
+    <rect x="894" y="363" width="272" height="66" rx="4"/>
+    <!-- setas bidirecionais hub <-> agente -->
+    <line x1="821" y1="280" x2="894" y2="244" marker-start="url(#tick)" marker-end="url(#tick)"/>
+    <line x1="836" y1="320" x2="894" y2="320" marker-start="url(#tick)" marker-end="url(#tick)"/>
+    <line x1="821" y1="360" x2="894" y2="396" marker-start="url(#tick)" marker-end="url(#tick)"/>
+  </g>
+
+  <g font-family="'Architects Daughter', cursive" fill="#3f3f46">
+    <text x="740" y="305" font-size="19" text-anchor="middle">mcp-sync</text>
+    <text x="740" y="335" font-size="13" text-anchor="middle" fill="#8b8b86" font-family="'JetBrains Mono', monospace">plan → apply</text>
+
+    <text x="918" y="239" font-size="19">Claude Code</text>
+    <text x="918" y="261" font-size="12" fill="#8b8b86" font-family="'JetBrains Mono', monospace">~/.claude.json · .mcp.json</text>
+
+    <text x="918" y="315" font-size="19">opencode</text>
+    <text x="918" y="337" font-size="12" fill="#8b8b86" font-family="'JetBrains Mono', monospace">opencode.json → mcp</text>
+
+    <text x="918" y="391" font-size="19">Codex</text>
+    <text x="918" y="413" font-size="12" fill="#8b8b86" font-family="'JetBrains Mono', monospace">~/.codex/config.toml</text>
+  </g>
+</svg>
+</body>
+</html>

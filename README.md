@@ -3,6 +3,8 @@
 [![CI](https://github.com/enzo-vargas/mcp-sync/actions/workflows/ci.yml/badge.svg)](https://github.com/enzo-vargas/mcp-sync/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/license-MIT-blue.svg)](./LICENSE)
 
+![mcp-sync: uma declaração dos servidores MCP, todos os agentes em sync — sem copiar credenciais](./docs/cover.png)
+
 Sincroniza a **declaração** dos servidores MCP entre **opencode**, **Claude Code** e **Codex** — em qualquer direção. Adicionar, alterar ou remover um MCP em um agente se reflete nos outros.
 
 O `mcp-sync` **nunca copia credenciais**. Ele propaga só a definição (nome, transporte, url, comando, nomes de variáveis de ambiente) e deixa cada agente autenticar por conta própria.
